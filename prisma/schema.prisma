@@ -40,6 +40,7 @@ model Transfer {
   user        User?    @relation(fields: [userId], references: [id])
   files       File[]
   transferUrl String   @unique // e.g., abc123
+  senderEmail String? // for download notification after recipient downloads
   expiresAt   DateTime
   createdAt   DateTime @default(now())
 

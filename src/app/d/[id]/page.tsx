@@ -7,8 +7,9 @@ import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default async function TransferPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function TransferPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ to?: string }> }) {
   const { id } = await params;
+  const { to: downloaderEmail } = await searchParams;
 
   let transfer: any = null;
   try {
@@ -30,7 +31,7 @@ export default async function TransferPage({ params }: { params: Promise<{ id: s
             <Link2 className="h-6 w-6" />
           </div>
           <h1 className="text-xl font-semibold">Transfer not found</h1>
-          <p className="text-sm text-zinc-500 font-mono mt-2">Invalid or expired link. Transfers auto-delete after 7 days.</p>
+          <p className="text-sm text-zinc-500 font-mono mt-2">Invalid or expired link. Transfers auto-delete after 4 days.</p>
           <Link href="/" className="inline-flex mt-6 h-10 px-5 rounded-full bg-white text-zinc-900 text-sm font-medium items-center">
             Go home
           </Link>
@@ -72,7 +73,7 @@ export default async function TransferPage({ params }: { params: Promise<{ id: s
                     Expired
                   </Button>
                 ) : (
-                  <a href={`/api/transfer/${transfer.transferUrl}/file/${f.id}`} className="inline-flex items-center justify-center gap-1.5 h-8 px-4 rounded-full bg-white text-zinc-900 hover:bg-zinc-200 text-xs font-medium">
+                  <a href={`/api/transfer/${transfer.transferUrl}/file/${f.id}${downloaderEmail ? `?to=${encodeURIComponent(downloaderEmail)}` : ""}`} className="inline-flex items-center justify-center gap-1.5 h-8 px-4 rounded-full bg-white text-zinc-900 hover:bg-zinc-200 text-xs font-medium">
                     <Download className="h-3.5 w-3.5" /> Download
                   </a>
                 )}
