@@ -1,0 +1,67 @@
+// Prisma schema for Speed Downloader — Supabase Postgres (free tier)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String        @id @default(cuid())
+  email     String?       @unique
+  jobs      DownloadJob[]
+  transfers Transfer[]
+  createdAt DateTime      @default(now())
+}
+
+model DownloadJob {
+  id           String    @id @default(cuid())
+  userId       String?
+  user         User?     @relation(fields: [userId], references: [id])
+  sourceUrl    String
+  detectedUrls Json? // [{ url, quality, ext, thumbnail, size }]
+  status       JobStatus @default(QUEUED)
+  progress     Int       @default(0)
+  fileUrl      String?
+  fileSize     BigInt?
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model Transfer {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  files       File[]
+  transferUrl String   @unique // e.g., abc123
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model File {
+  id         String   @id @default(cuid())
+  transferId String
+  transfer   Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  filename   String
+  s3Key      String
+  size       BigInt
+  mimeType   String
+  createdAt  DateTime @default(now())
+}
+
+enum JobStatus {
+  QUEUED
+  PARSING
+  DOWNLOADING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
