@@ -24,7 +24,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
       className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body suppressHydrationWarning className="min-h-full flex flex-col bg-[#09090b] text-zinc-100">{children}</body>
+      <body suppressHydrationWarning className="min-h-full flex flex-col bg-[#09090b] text-zinc-100">
+        <script dangerouslySetInnerHTML={{ __html: `try{document.querySelectorAll('[bis_skin_checked]').forEach(e=>e.removeAttribute('bis_skin_checked'))}catch{}` }} />
+        {children}</body>
     </html>
   );
 }

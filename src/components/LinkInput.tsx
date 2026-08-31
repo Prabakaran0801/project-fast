@@ -9,20 +9,39 @@ export function LinkInput({ onDetect }: { onDetect: (jobId: string, url: string)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function extractUrl(raw: string): string {
+    let s = raw.trim();
+    const srcMatch = s.match(/src\s*=\s*["']([^"']+)["']/i);
+    if (srcMatch) s = srcMatch[1].trim();
+    if (s.startsWith("//")) s = "https:" + s;
+    if (s.includes("<") || s.includes('"') || (!s.startsWith("http") && s.includes("http"))) {
+      const m = s.match(/https?:\/\/[^"'<>\s]+/);
+      if (m) s = m[0];
+    }
+    s = s.replace(/&amp;/g, "&");
+    try {
+      const u = new URL(s);
+      const embed = u.pathname.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
+      if (embed) return `https://www.youtube.com/watch?v=${embed[1]}`;
+    } catch {}
+    return s;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!url.trim()) return;
+    const cleaned = extractUrl(url);
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: cleaned }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to parse");
-      onDetect(data.jobId, url);
+      onDetect(data.jobId, cleaned);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -40,7 +59,7 @@ export function LinkInput({ onDetect }: { onDetect: (jobId: string, url: string)
           <Input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="Paste any website or video URL..."
+            placeholder="Paste video URL or iframe embed code..."
             className="pl-11 pr-[128px] h-14 text-[14px] bg-zinc-900 border-zinc-700 rounded-2xl shadow-sm font-mono placeholder:text-zinc-500 text-white"
           />
           <Button

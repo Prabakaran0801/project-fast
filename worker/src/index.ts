@@ -101,12 +101,16 @@ async function mergeHighRes(url: string, targetHeight: number, jobId: string): P
 
   const body = fs.readFileSync(outPath);
   const key = `merged/${jobId}/${targetHeight}p-${Date.now()}.mp4`;
+  // 30 min expiry for prod (was 60s testing)
+  const TEST_EXPIRE_SEC = 30 * 60;
   await s3.send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
       Body: body,
       ContentType: "video/mp4",
+      CacheControl: `public, max-age=${TEST_EXPIRE_SEC}`,
+      Expires: new Date(Date.now() + TEST_EXPIRE_SEC * 1000),
     })
   );
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -208,11 +212,13 @@ const parseWorker = new Worker(
       const seen = new Set<string>();
       detected = detected.filter((d: any) => (seen.has(d.quality) ? false : (seen.add(d.quality), true)));
 
+      // 30 min expiry
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
       await prisma.downloadJob.update({
         where: { id: jobId },
-        data: { detectedUrls: detected as any, status: "COMPLETED", progress: 100 },
+        data: { detectedUrls: detected as any, status: "COMPLETED", progress: 100, expiresAt },
       });
-      console.log(`[parse] ${jobId} completed with ${detected.length} sources`);
+      console.log(`[parse] ${jobId} completed with ${detected.length} sources expiresAt=${expiresAt.toISOString()}`);
     } catch (err) {
       console.error(`[parse] ${jobId} failed`, err);
       await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "FAILED" } });
@@ -249,16 +255,17 @@ const downloadWorker = new Worker(
             clearInterval(progressInterval);
           }
         })();
-        await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, fileUrl: mergedUrl } });
-        console.log(`[download] ${jobId} merged ${height}p -> ${mergedUrl.slice(0, 80)}`);
+        const exp30m = new Date(Date.now() + 30 * 60 * 1000);
+        await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, fileUrl: mergedUrl, expiresAt: exp30m } });
+        console.log(`[download] ${jobId} merged ${height}p -> ${mergedUrl.slice(0, 80)} expiresAt=${exp30m.toISOString()}`);
         return;
       }
       await prisma.downloadJob.update({ where: { id: jobId }, data: { progress: 75 } });
       await new Promise((r) => setTimeout(r, 400));
-      await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, fileUrl: url } });
+      await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, fileUrl: url, expiresAt: new Date(Date.now() + 30 * 60 * 1000) } });
     } catch (e) {
       console.error(`[download] ${jobId} failed, falling back to direct url`, e);
-      await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, fileUrl: url } });
+      await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, fileUrl: url, expiresAt: new Date(Date.now() + 30 * 60 * 1000) } });
     }
   },
   { connection, concurrency: 1 } // merge is heavy, concurrency 1

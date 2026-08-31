@@ -14,11 +14,25 @@ export default function Home() {
   const [jobProgress, setJobProgress] = useState<number>(0);
   const [activeTab, setActiveTab] = useState("download");
   const [downloading, setDownloading] = useState<{ quality: string; progress: number } | null>(null);
+  const [expiredVideo, setExpiredVideo] = useState<string | null>(null);
+
+  // Global cleanup on reload — deletes all expired /merged files from R2 (console logged server side)
+  useEffect(() => {
+    fetch("/api/cleanup", { method: "POST" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.deleted > 0) console.log(`[cleanup] deleted ${d.deleted} expired R2 files on reload`, d);
+        else console.log("[cleanup] no expired files on reload", d);
+      })
+      .catch((e) => console.warn("[cleanup] failed", e));
+  }, []);
 
   useEffect(() => {
     if (!jobId) return;
     setJobStatus("PARSING");
     setJobProgress(10);
+    setExpiredVideo(null);
+    let completedSeen = false;
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/job/${jobId}`);
@@ -27,7 +41,19 @@ export default function Home() {
         setJobProgress(data.progress ?? 0);
         if (data.detectedUrls) setVideos(data.detectedUrls as DetectedVideo[]);
         if (data.fileUrl && downloading) setDownloading(null);
-        if (data.status === "COMPLETED" || data.status === "FAILED") clearInterval(interval);
+        if (data.status === "COMPLETED") completedSeen = true;
+        if (data.status === "EXPIRED") {
+          const title = (data.detectedUrls?.[0]?.title as string) || data.sourceUrl || "Video";
+          console.log(`[expired] Job ${jobId} expired — video: "${title}" at ${new Date().toISOString()}`);
+          console.warn(`EXPIRED: "${title}" was deleted after 1 min (testing). Re-paste to rebuild.`);
+          setExpiredVideo(title);
+          clearInterval(interval);
+        }
+        if (data.status === "FAILED") clearInterval(interval);
+        // Keep polling after COMPLETED to detect 1 min expiry — stop after 3 min
+        if (completedSeen && data.status === "COMPLETED") {
+          // continue polling for expiry
+        }
       } catch {}
     }, 1200);
     fetch(`/api/job/${jobId}`)
@@ -36,12 +62,22 @@ export default function Home() {
         if (data.detectedUrls) setVideos(data.detectedUrls);
         setJobStatus(data.status);
         setJobProgress(data.progress ?? 0);
+        if (data.status === "EXPIRED") {
+          const title = (data.detectedUrls?.[0]?.title as string) || data.sourceUrl || "Video";
+          console.log(`[expired] Job ${jobId} expired on initial fetch — video: "${title}"`);
+          setExpiredVideo(title);
+        }
       });
-    return () => clearInterval(interval);
+    // Safety: clear after 4 min to avoid infinite poll
+    const timeout = setTimeout(() => clearInterval(interval), 4 * 60 * 1000);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
   }, [jobId]);
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-white">
+    <div suppressHydrationWarning className="min-h-screen bg-[#09090b] text-white">
       <Header />
       <main>
         <section className="relative overflow-hidden">
@@ -128,6 +164,7 @@ export default function Home() {
                     )}
                     <VideoGrid
                       videos={videos}
+                      jobId={jobId}
                       onDownload={async (v) => {
                         if (!jobId) return;
                         const jobRes = await fetch(`/api/job/${jobId}`).then((r) => r.json()).catch(() => null);
@@ -168,21 +205,33 @@ export default function Home() {
                           return;
                         }
                         setDownloading({ quality: v.quality, progress: 50 });
+                        console.log(`[download] Hybrid 302 — direct muxed ${v.quality} -> ${v.url.slice(0, 80)} (Cloudflare Cache 1h, no R2)`);
                         await fetch("/api/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, formatUrl: v.url, height, sourceUrl, needsMerge: v.needsMerge }) });
-                        const proxyUrl = `/api/download/proxy?url=${encodeURIComponent(v.url)}&title=${encodeURIComponent(title)}&quality=${encodeURIComponent(v.quality)}`;
+                        // Hybrid: direct redirect to googlevideo via 302 (proxy now 302) — fast + free, no R2
+                        const directUrl = v.url;
+                        console.log(`[download] Triggering 302 download for ${v.quality}: ${directUrl.slice(0, 100)}`);
                         setTimeout(() => {
                           setDownloading(null);
+                          // Use direct URL for fastest path (Cloudflare caches googlevideo); proxy 302 also works: `/api/download/proxy?url=...`
                           const a = document.createElement("a");
-                          a.href = proxyUrl;
-                          a.download = "";
+                          a.href = directUrl;
+                          a.target = "_blank";
+                          a.rel = "noopener";
                           document.body.appendChild(a);
                           a.click();
                           a.remove();
-                        }, 600);
+                          console.log(`[download] Started ${v.quality} download`);
+                        }, 300);
                       }}
                     />
                     {videos.length === 0 && jobStatus === "COMPLETED" && (
                       <p className="mt-6 text-center text-sm font-mono text-zinc-500">No videos detected. Try a direct video URL.</p>
+                    )}
+                    {jobStatus === "EXPIRED" && (
+                      <div className="mt-6 rounded-2xl border border-amber-900/50 bg-amber-950/20 p-4 text-center">
+                        <p className="text-sm font-mono text-amber-400">Video expired — “{expiredVideo || "this video"}” was deleted after 1 min (testing). Re-paste to rebuild.</p>
+                        <button onClick={() => { setJobId(null); setVideos([]); setJobStatus(null); setExpiredVideo(null); }} className="mt-3 h-8 px-4 rounded-full bg-amber-500 text-zinc-900 text-xs font-medium">Re-parse</button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -246,6 +295,21 @@ export default function Home() {
           </div>
         </section>
       </main>
+
+      {expiredVideo && jobStatus === "EXPIRED" && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm grid place-items-center z-50 p-4" onClick={() => setExpiredVideo(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl bg-[#121214] border border-zinc-800 p-6 text-center shadow-xl">
+            <div className="mx-auto w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 grid place-items-center mb-3">⏰</div>
+            <h3 className="text-sm font-semibold text-white">Video expired</h3>
+            <p className="text-xs font-mono text-zinc-400 mt-1 break-all">“{expiredVideo}” was deleted after 1 min (testing mode).</p>
+            <p className="text-[11px] font-mono text-zinc-500 mt-2">R2 object expired + DB status EXPIRED. Re-paste the link to rebuild.</p>
+            <div className="flex gap-2 justify-center mt-4">
+              <button onClick={() => setExpiredVideo(null)} className="h-8 px-4 rounded-full bg-zinc-800 text-white text-xs font-medium border border-zinc-700">Close</button>
+              <button onClick={() => { setExpiredVideo(null); setJobId(null); setVideos([]); setJobStatus(null); }} className="h-8 px-4 rounded-full bg-white text-zinc-900 text-xs font-medium">Re-parse</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="border-t border-zinc-800 py-6">
         <div className="mx-auto max-w-[1120px] px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs font-mono text-zinc-500">

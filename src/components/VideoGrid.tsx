@@ -2,7 +2,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Download, Film, Clock, HardDrive, ExternalLink } from "lucide-react";
+import { Download, Film, Clock, HardDrive } from "lucide-react";
 
 export type DetectedVideo = {
   url: string;
@@ -22,6 +22,7 @@ export function VideoGrid({
 }: {
   videos: DetectedVideo[];
   onDownload: (video: DetectedVideo) => void;
+  jobId?: string | null;
 }) {
   if (!videos.length) return null;
 
@@ -45,14 +46,10 @@ export function VideoGrid({
               </Badge>
               <Badge className="font-mono text-[10px] tracking-[0.12em] rounded-full px-2 py-1 bg-white text-zinc-900">{v.quality}</Badge>
             </div>
-            <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-              <span className="inline-flex items-center gap-1 text-[11px] font-mono bg-black/70 text-white px-2 py-1 rounded-full backdrop-blur">
-                <ExternalLink className="h-3 w-3" /> {new URL(v.url).hostname.replace("www.", "")}
-              </span>
-            </div>
+
           </div>
           <CardContent className="p-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 text-[11px] font-mono text-zinc-400 min-w-0">
+            <div className="flex items-center gap-2 text-[11px] font-mono text-zinc-400 min-w-0 flex-wrap">
               {v.duration && (
                 <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-800 text-zinc-300">
                   <Clock className="h-3 w-3" /> {v.duration}
@@ -64,17 +61,13 @@ export function VideoGrid({
                 </span>
               )}
             </div>
-            <div className="flex flex-col items-end gap-1">
-              {v.needsMerge && <span className="text-[10px] font-mono text-amber-400">1080p+ • merges audio (30s)</span>}
-              <Button
-                size="sm"
-                onClick={() => onDownload(v)}
-                className="shrink-0 rounded-full gap-1.5 bg-white text-zinc-900 hover:bg-zinc-200 h-8 px-4 text-xs font-medium"
-                title={v.needsMerge ? "High-res requires server merge to add audio" : "Direct muxed download with audio"}
-              >
-                <Download className="h-3.5 w-3.5" /> Download
-              </Button>
-            </div>
+            <Button
+              size="sm"
+              onClick={() => onDownload(v)}
+              className="shrink-0 rounded-full gap-1.5 bg-white text-zinc-900 hover:bg-zinc-200 h-8 px-4 text-xs font-medium"
+            >
+              <Download className="h-3.5 w-3.5" /> Download
+            </Button>
           </CardContent>
         </Card>
       ))}

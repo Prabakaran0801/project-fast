@@ -4,7 +4,38 @@ import { checkRateLimit } from "@/lib/ratelimit";
 import { getQueue, QUEUE_NAMES } from "@/lib/queue";
 import prisma from "@/lib/prisma";
 
-const schema = z.object({ url: z.string().url() });
+const schema = z.object({ url: z.string().min(1) });
+
+function extractUrl(raw: string): string | null {
+  let s = raw.trim();
+  // If user pasted <iframe ... src="https://..."> extract src
+  const srcMatch = s.match(/src\s*=\s*["']([^"']+)["']/i);
+  if (srcMatch) s = srcMatch[1].trim();
+  // Protocol-relative //www.youtube.com/embed/...
+  if (s.startsWith("//")) s = "https:" + s;
+  // If still contains HTML, try to find any https URL inside
+  if (s.includes("<") || s.includes('"') || (!s.startsWith("http") && s.includes("http"))) {
+    const urlMatch = s.match(/https?:\/\/[^"'<>\s]+/);
+    if (urlMatch) s = urlMatch[0];
+  }
+  s = s.replace(/&amp;/g, "&");
+  // Normalize YouTube embed -> watch?v=
+  try {
+    const u = new URL(s);
+    // youtube.com/embed/VIDEOID
+    const embed = u.pathname.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
+    if (embed) {
+      const vid = embed[1];
+      return `https://www.youtube.com/watch?v=${vid}`;
+    }
+    // youtube-nocookie embed
+    if (u.hostname.includes("youtube-nocookie.com") && embed) {
+      return `https://www.youtube.com/watch?v=${embed[1]}`;
+    }
+    // Ensure youtube short links work as-is, no change needed
+  } catch {}
+  return s;
+}
 
 export async function POST(req: NextRequest) {
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
@@ -16,10 +47,17 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid URL — paste a video link or iframe embed code" }, { status: 400 });
   }
 
-  const { url } = parsed.data;
+  const raw = parsed.data.url;
+  const url = extractUrl(raw);
+  if (!url) return NextResponse.json({ error: "Invalid URL — could not extract link from embed code" }, { status: 400 });
+  try {
+    new URL(url);
+  } catch {
+    return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+  }
 
   // Block private IPs to prevent SSRF
   try {
