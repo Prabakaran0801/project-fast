@@ -381,15 +381,13 @@ export default function Home() {
 
       <footer className="border-t border-zinc-800 py-6 mt-auto">
         <div className="mx-auto max-w-[1120px] px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono text-zinc-500">
-          <span className="text-center sm:text-left">
-            © 2026 SPEEDDL — Minimalist developer tool. Next.js + Supabase + R2
-            + Nodemailer.
+          <span className="text-center text-white sm:text-left">
+            © 2026 SPEEDDL
           </span>
           <span className="flex items-center justify-center gap-2 shrink-0">
-            <span className="px-2 py-1 rounded-full bg-white text-zinc-900 text-[11px]">
-              v0.1.0-beta
+            <span className="px-2 py-1  text-white text-[11px]">
+              Terms & conditions
             </span>
-            <span>Free tier ready</span>
           </span>
         </div>
       </footer>

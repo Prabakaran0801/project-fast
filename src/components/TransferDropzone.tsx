@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useState } from "react";
+import { useCallback, useState, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,6 @@ export function TransferDropzone() {
   const [emailInput, setEmailInput] = useState("");
   const [fromEmail, setFromEmail] = useState("");
   const [message, setMessage] = useState("");
-  const [sendCopy, setSendCopy] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -33,8 +32,9 @@ export function TransferDropzone() {
   function addEmail() {
     const trimmed = emailInput.trim().toLowerCase();
     const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!trimmed) return;
+    if (!trimmed) { setEmailError("Enter recipient email"); return; }
     if (!emailRe.test(trimmed)) { setEmailError("Invalid email"); return; }
+    if (fromEmail && trimmed === fromEmail.trim().toLowerCase()) { setEmailError("Sender and recipient must be different"); return; }
     if (emails.includes(trimmed)) { setEmailError("Already added"); return; }
     if (emails.length >= 5) { setEmailError("Max 5 recipients"); return; }
     setEmails([...emails, trimmed]);
@@ -44,50 +44,76 @@ export function TransferDropzone() {
 
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadedBytes, setUploadedBytes] = useState<number>(0);
-  const [perFileProgress, setPerFileProgress] = useState<Record<string, number>>({});
 
   function formatMB(bytes: number) {
     return (bytes / 1024 / 1024).toFixed(2);
   }
 
-  function uploadWithProgress(url: string, file: File, onProgress: (loaded: number, total: number) => void): Promise<void> {
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
+
+  function uploadWithProgress(url: string, file: File, onProgress: (loaded: number, total: number) => void, signal?: { cancelled: boolean }): Promise<void> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      xhrRef.current = xhr;
       xhr.open("PUT", url);
       xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) onProgress(e.loaded, e.total);
       };
-      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`R2 upload failed for ${file.name}: ${xhr.status} ${xhr.responseText?.slice(0, 200)}`)));
-      xhr.onerror = () => reject(new Error(`Network error uploading ${file.name} — check R2 CORS allows PUT from ${window.location.origin}`));
+      xhr.onload = () => {
+        xhrRef.current = null;
+        if (signal?.cancelled) return reject(new Error("Upload cancelled"));
+        xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`R2 upload failed for ${file.name}: ${xhr.status} ${xhr.responseText?.slice(0, 200)}`));
+      };
+      xhr.onerror = () => {
+        xhrRef.current = null;
+        if (signal?.cancelled) return reject(new Error("Upload cancelled"));
+        reject(new Error(`Network error uploading ${file.name} — check R2 CORS allows PUT from ${window.location.origin}`));
+      };
+      xhr.onabort = () => {
+        xhrRef.current = null;
+        reject(new Error("Upload cancelled"));
+      };
       xhr.send(file);
     });
+  }
+
+  function handleCancel() {
+    if (xhrRef.current) {
+      xhrRef.current.abort();
+      xhrRef.current = null;
+    }
+    setUploading(false);
+    setUploadProgress(0);
+    setUploadedBytes(0);
+    setError("Upload cancelled");
+    console.log("[transfer] cancelled by user");
   }
 
   const hasValidRecipient = emails.length > 0;
   const hasValidSender = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fromEmail);
   const canTransfer = hasValidRecipient && hasValidSender && files.length > 0;
+  const isSameEmail = hasValidRecipient && hasValidSender && emails.some((e) => e.toLowerCase() === fromEmail.trim().toLowerCase());
 
   async function handleUpload() {
-    if (!files.length) return;
-    if (!hasValidRecipient) { setError("Add at least one recipient email (To) — required"); return; }
-    if (!hasValidSender) { setError("Add your sender email (From) — required"); return; }
+    if (!files.length) { setError("Add files to transfer"); return; }
+    if (!hasValidRecipient) { setError("Email to is required — add at least one recipient"); return; }
+    if (!hasValidSender) { setError("Your email is required"); return; }
+    if (isSameEmail) { setError("Sender and recipient must be different"); return; }
     setUploading(true);
     setUploadProgress(0);
     setUploadedBytes(0);
-    setPerFileProgress({});
     setError(null);
     try {
-      // 1. Create transfer + get presigned POSTs (direct browser → R2, no server bottleneck)
+      // 1. Create transfer + get presigned PUTs (direct browser → R2)
       const res = await fetch("/api/transfer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           files: files.map((f) => ({ name: f.name, size: f.size, type: f.type })),
-          emails: emails.length ? emails : undefined,
+          emails,
           message: message || undefined,
-          fromEmail: fromEmail || undefined,
-          sendCopy,
+          fromEmail,
         }),
       });
       const data = await res.json();
@@ -108,16 +134,19 @@ export function TransferDropzone() {
             continue;
           }
           const fileStartBytes = completedBytes;
+          const cancelSignal = { cancelled: false };
+          // allow cancel to set flag
+          if ((handleCancel as any)._signal) (handleCancel as any)._signal.cancelled = true;
+          (handleCancel as any)._signal = cancelSignal;
           await uploadWithProgress(target.uploadUrl, file, (loaded, total) => {
+            if (cancelSignal.cancelled) return;
             const overallLoaded = fileStartBytes + loaded;
             const pct = Math.round((overallLoaded / totalBytes) * 100);
             setUploadProgress(pct);
             setUploadedBytes(overallLoaded);
-            setPerFileProgress((prev) => ({ ...prev, [file.name]: Math.round((loaded / total) * 100) }));
-          });
+          }, cancelSignal);
           completedBytes += file.size;
           setUploadedBytes(completedBytes);
-          setPerFileProgress((prev) => ({ ...prev, [file.name]: 100 }));
           console.log(`[transfer] uploaded ${file.name} ${formatMB(file.size)} MB ${idx + 1}/${files.length}`);
         }
         setUploadProgress(100);
@@ -198,37 +227,23 @@ export function TransferDropzone() {
       {files.length > 0 && (
         <div className="mt-6 space-y-3">
           <div className="space-y-2">
-            {files.map((f, i) => {
-              const p = perFileProgress[f.name];
-              const isUploadingFile = uploading && p !== undefined && p < 100;
-              return (
-                <div key={i} className="flex flex-col gap-1.5 p-3 rounded-xl border border-zinc-800 bg-zinc-900 text-sm">
-                  <div className="flex items-center gap-3">
-                    <FileIcon className="h-4 w-4 text-zinc-500 shrink-0" />
-                    <span className="flex-1 truncate font-mono text-xs text-white">{f.name}</span>
-                    <span className="text-xs text-zinc-400 font-mono">
-                      {isUploadingFile ? `${formatMB((f.size * p) / 100)} / ${formatMB(f.size)} MB` : `${formatMB(f.size)} MB`}
-                    </span>
-                    {!uploading && (
-                      <button onClick={() => setFiles(files.filter((_, idx) => idx !== i))} className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white">
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    {uploading && p === 100 && <Check className="h-3.5 w-3.5 text-emerald-500" />}
-                  </div>
-                  {uploading && p !== undefined && (
-                    <div className="h-1 w-full rounded-full bg-zinc-800 overflow-hidden">
-                      <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${p}%` }} />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {files.map((f, i) => (
+              <div key={i} className="flex items-center gap-3 p-3 rounded-xl border border-zinc-800 bg-zinc-900 text-sm">
+                <FileIcon className="h-4 w-4 text-zinc-500 shrink-0" />
+                <span className="flex-1 truncate font-mono text-xs text-white">{f.name}</span>
+                <span className="text-xs text-zinc-400 font-mono">{formatMB(f.size)} MB</span>
+                {!uploading && (
+                  <button onClick={() => setFiles(files.filter((_, idx) => idx !== i))} className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
             <div className="text-xs font-mono text-zinc-500 text-right">{files.length} files · {formatMB(totalSize)} MB</div>
           </div>
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-white"><Mail className="h-4 w-4" /> Email link to</div>
+            <label className="text-xs font-mono tracking-[0.08em] text-zinc-400">Email to *</label>
             <div className="flex gap-2">
               <Input value={emailInput} onChange={(e) => setEmailInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addEmail(); } }} placeholder="recipient@email.com" className="flex-1 h-9 rounded-xl font-mono text-sm" />
               <Button type="button" variant="outline" onClick={addEmail} className="rounded-xl h-9">Add</Button>
@@ -243,31 +258,34 @@ export function TransferDropzone() {
                 ))}
               </div>
             )}
-            <Input value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} placeholder="Your email (From) — required" className="h-9 rounded-xl font-mono text-sm" />
+            <label className="text-xs font-mono tracking-[0.08em] text-zinc-400">Your email *</label>
+            <Input value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} placeholder="your@email.com" className="h-9 rounded-xl font-mono text-sm" />
+            {isSameEmail && <p className="text-xs text-red-400 font-mono flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Sender and recipient must be different</p>}
+            <label className="text-xs font-mono tracking-[0.08em] text-zinc-400">Message (optional)</label>
             <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Message — optional" rows={2} className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-white font-sans" />
-            <label className="flex items-center gap-2 text-xs font-mono text-zinc-400">
-              <input type="checkbox" checked={sendCopy} onChange={(e) => setSendCopy(e.target.checked)} className="rounded border-zinc-600 bg-zinc-900" /> Send me a copy
-            </label>
-            <p className="text-[11px] font-mono text-zinc-500">Both sender + recipient required. Up to 5 recipients. Link expires in 4 days.</p>
           </div>
 
-          {error && <p className="text-sm text-red-400 font-mono flex items-center gap-1"><AlertCircle className="h-4 w-4" /> {error}</p>}
+          {error && <p className="text-sm text-red-400 font-mono flex items-center gap-1 bg-red-950/30 border border-red-900 rounded-xl px-3 py-2"><AlertCircle className="h-4 w-4" /> {error}</p>}
+          {isSameEmail && !error && <p className="text-sm text-red-400 font-mono flex items-center gap-1 bg-red-950/30 border border-red-900 rounded-xl px-3 py-2"><AlertCircle className="h-4 w-4" /> Sender and recipient must be different</p>}
           {uploading && (
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-3 space-y-2">
               <div className="flex justify-between text-xs font-mono">
-                <span className="text-zinc-400">Uploading to R2...</span>
+                <span className="text-zinc-400">Uploading...</span>
                 <span className="text-white">{formatMB(uploadedBytes)} / {formatMB(totalSize)} MB • {uploadProgress}%</span>
               </div>
               <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
                 <div className="h-full bg-white rounded-full transition-all duration-200" style={{ width: `${uploadProgress}%` }} />
               </div>
-              <p className="text-[11px] font-mono text-zinc-500 text-center">Direct browser → R2 (presigned POST, bypasses server)</p>
             </div>
           )}
-          <Button onClick={handleUpload} disabled={uploading || !canTransfer} className="w-full rounded-full h-11 gap-2 disabled:opacity-50 disabled:cursor-not-allowed" title={!canTransfer ? "Add recipient + sender emails to enable" : undefined}>
-            {uploading ? (uploadProgress > 0 ? `Uploading ${uploadProgress}%...` : "Creating transfer...") : <><Send className="h-4 w-4" /> Create transfer {canTransfer ? `+ Send email` : "(add To + From to enable)"}</>}
-          </Button>
-          {!canTransfer && files.length > 0 && <p className="text-xs font-mono text-amber-400 text-center">Add recipient (To) + your email (From) above to enable Create transfer</p>}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => { if (uploading) handleCancel(); else { setFiles([]); setEmails([]); setEmailError(null); setError(null); setUploadProgress(0); setUploadedBytes(0); } }} className="flex-1 rounded-full h-11 gap-2">
+              {uploading ? "Cancel upload" : "Cancel"}
+            </Button>
+            <Button onClick={handleUpload} disabled={uploading || !canTransfer || isSameEmail} className="flex-1 rounded-full h-11 gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+              {uploading ? `${uploadProgress}%` : <><Send className="h-4 w-4" /> Transfer</>}
+            </Button>
+          </div>
         </div>
       )}
     </Card>
