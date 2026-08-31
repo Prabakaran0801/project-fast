@@ -2,15 +2,18 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Download, Film, Clock, HardDrive } from "lucide-react";
+import { Download, Film, Clock, HardDrive, ExternalLink } from "lucide-react";
 
 export type DetectedVideo = {
   url: string;
   quality: string;
+  height?: number;
   ext: string;
   thumbnail?: string;
   size?: string;
   duration?: string;
+  hasAudio?: boolean;
+  needsMerge?: boolean;
 };
 
 export function VideoGrid({
@@ -23,40 +26,55 @@ export function VideoGrid({
   if (!videos.length) return null;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
       {videos.map((v, i) => (
-        <Card key={i} className="overflow-hidden border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors group">
-          <div className="aspect-video bg-zinc-100 dark:bg-zinc-900 relative overflow-hidden flex items-center justify-center">
+        <Card key={i} className="overflow-hidden border-zinc-800 bg-[#121214] rounded-2xl shadow-sm hover:border-zinc-700 transition-all group">
+          <div className="aspect-video bg-zinc-900 relative overflow-hidden flex items-center justify-center border-b border-zinc-800">
             {v.thumbnail ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={v.thumbnail} alt="" className="w-full h-full object-cover" />
+              <img src={v.thumbnail} alt="" className="w-full h-full object-cover group-hover:scale-[1.01] transition-transform duration-300" />
             ) : (
-              <Film className="h-10 w-10 text-zinc-300 dark:text-zinc-700" />
+              <div className="flex flex-col items-center gap-2 text-zinc-600">
+                <Film className="h-9 w-9" />
+                <span className="text-[11px] font-mono tracking-[0.14em]">NO PREVIEW</span>
+              </div>
             )}
-            <div className="absolute top-3 left-3 flex gap-2">
-              <Badge variant="secondary" className="font-mono text-[10px] tracking-wider bg-white/90 backdrop-blur">
+            <div className="absolute top-3 left-3 flex gap-1.5">
+              <Badge variant="secondary" className="font-mono text-[10px] tracking-[0.12em] bg-zinc-800 border-zinc-700 text-zinc-200 px-2 py-1 rounded-full">
                 {v.ext.toUpperCase()}
               </Badge>
-              <Badge className="font-mono text-[10px]">{v.quality}</Badge>
+              <Badge className="font-mono text-[10px] tracking-[0.12em] rounded-full px-2 py-1 bg-white text-zinc-900">{v.quality}</Badge>
+            </div>
+            <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="inline-flex items-center gap-1 text-[11px] font-mono bg-black/70 text-white px-2 py-1 rounded-full backdrop-blur">
+                <ExternalLink className="h-3 w-3" /> {new URL(v.url).hostname.replace("www.", "")}
+              </span>
             </div>
           </div>
-          <CardContent className="p-4 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 text-xs font-mono text-zinc-500 min-w-0">
+          <CardContent className="p-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 text-[11px] font-mono text-zinc-400 min-w-0">
               {v.duration && (
-                <span className="flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-800 text-zinc-300">
                   <Clock className="h-3 w-3" /> {v.duration}
                 </span>
               )}
               {v.size && (
-                <span className="flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-800 text-zinc-300">
                   <HardDrive className="h-3 w-3" /> {v.size}
                 </span>
               )}
-              <span className="truncate max-w-[160px] hidden sm:inline">{new URL(v.url).hostname}</span>
             </div>
-            <Button size="sm" onClick={() => onDownload(v)} className="shrink-0 rounded-xl gap-1.5">
-              <Download className="h-3.5 w-3.5" /> Download
-            </Button>
+            <div className="flex flex-col items-end gap-1">
+              {v.needsMerge && <span className="text-[10px] font-mono text-amber-400">1080p+ • merges audio (30s)</span>}
+              <Button
+                size="sm"
+                onClick={() => onDownload(v)}
+                className="shrink-0 rounded-full gap-1.5 bg-white text-zinc-900 hover:bg-zinc-200 h-8 px-4 text-xs font-medium"
+                title={v.needsMerge ? "High-res requires server merge to add audio" : "Direct muxed download with audio"}
+              >
+                <Download className="h-3.5 w-3.5" /> Download
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ))}

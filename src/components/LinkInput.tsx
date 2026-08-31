@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowRight, Link2, Loader2, Terminal } from "lucide-react";
+import { ArrowRight, Link2, Loader2, AlertCircle } from "lucide-react";
 
 export function LinkInput({ onDetect }: { onDetect: (jobId: string, url: string) => void }) {
   const [url, setUrl] = useState("");
@@ -31,22 +31,22 @@ export function LinkInput({ onDetect }: { onDetect: (jobId: string, url: string)
   }
 
   return (
-    <div className="w-full max-w-2xl mx-auto">
-      <form onSubmit={handleSubmit} className="relative group">
+    <div className="w-full">
+      <form onSubmit={handleSubmit} className="relative">
         <div className="relative flex items-center">
-          <div className="absolute left-4 text-zinc-400">
+          <div className="absolute left-4 text-zinc-500 pointer-events-none">
             <Link2 className="h-4 w-4" />
           </div>
           <Input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="Paste any website or video URL..."
-            className="pl-11 pr-32 h-14 text-[15px] bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm focus-visible:ring-zinc-900 font-mono"
+            className="pl-11 pr-[128px] h-14 text-[14px] bg-zinc-900 border-zinc-700 rounded-2xl shadow-sm font-mono placeholder:text-zinc-500 text-white"
           />
           <Button
             type="submit"
             disabled={loading || !url.trim()}
-            className="absolute right-1.5 h-11 px-6 rounded-xl font-medium"
+            className="absolute right-1.5 h-11 px-6 rounded-xl font-medium bg-white text-zinc-900 hover:bg-zinc-200 shadow-sm disabled:opacity-50"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
             {loading ? "Detecting" : "Detect"}
@@ -54,11 +54,11 @@ export function LinkInput({ onDetect }: { onDetect: (jobId: string, url: string)
         </div>
       </form>
       {error && (
-        <p className="mt-3 text-sm text-red-600 dark:text-red-400 font-mono flex items-center gap-2">
-          <Terminal className="h-3.5 w-3.5" /> {error}
-        </p>
+        <div className="mt-3 flex items-center gap-2 text-sm text-red-400 font-mono bg-red-950/30 border border-red-900 rounded-xl px-3 py-2">
+          <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+        </div>
       )}
-      <p className="mt-3 text-center text-xs text-zinc-500 font-mono">
+      <p className="mt-3 text-center text-[11px] font-mono tracking-wide text-zinc-500">
         Supports YouTube, TikTok, Instagram, Vimeo, Twitter & 1000+ sites via yt-dlp
       </p>
     </div>

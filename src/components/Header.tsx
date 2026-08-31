@@ -1,23 +1,23 @@
 import Link from "next/link";
-import { Zap, Github } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Zap, Github, Clock3 } from "lucide-react";
 
 export function Header() {
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-white/80 dark:bg-zinc-950/80 backdrop-blur supports-[backdrop-filter]:bg-white/60">
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 h-14 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 grid place-items-center">
-            <Zap className="h-4 w-4" />
+    <header className="sticky top-0 z-50 w-full border-b border-zinc-800 bg-zinc-950/70 backdrop-blur-xl">
+      <div className="mx-auto max-w-[1120px] px-4 sm:px-6 h-[56px] flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-3 group">
+          <div className="h-8 w-8 rounded-xl bg-white text-zinc-900 grid place-items-center shadow-sm group-hover:scale-[1.02] transition-transform">
+            <Zap className="h-[15px] w-[15px]" />
           </div>
-          <span className="font-semibold tracking-tight text-sm">SPEED<span className="font-mono font-normal text-zinc-500">DL</span></span>
-          <span className="hidden sm:inline-flex text-[10px] font-mono tracking-widest px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500">BETA</span>
+          <span className="font-semibold tracking-[-0.02em] text-[14px] text-white">SPEED<span className="font-mono font-normal text-zinc-400">DL</span></span>
+          <span className="hidden sm:inline-flex text-[10px] font-mono tracking-[0.14em] px-2 py-1 rounded-full bg-white text-zinc-900">BETA</span>
         </Link>
         <nav className="flex items-center gap-1">
-          <Link href="/history" className="text-sm font-mono text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white px-3 py-2">
-            History
+          <Link href="/history" className="inline-flex items-center gap-1.5 text-[13px] font-mono tracking-wide text-zinc-400 hover:text-white px-3 py-2 rounded-full hover:bg-zinc-800 transition-colors">
+            <Clock3 className="h-3.5 w-3.5" /> History
           </Link>
-          <a href="https://github.com" target="_blank" rel="noreferrer" aria-label="GitHub" className="inline-flex h-9 w-9 items-center justify-center rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <span className="hidden sm:inline-block h-4 w-px bg-zinc-800 mx-1" />
+          <a href="https://github.com" target="_blank" rel="noreferrer" aria-label="GitHub" className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
             <Github className="h-4 w-4" />
           </a>
         </nav>
