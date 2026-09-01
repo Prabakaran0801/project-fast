@@ -83,3 +83,21 @@ body {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
+
+/* Phase 3 — emil-design-eng motion tokens (hardware-accel only, 150ms easeOut) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+.motion-safe { will-change: transform, opacity; }
+
+/* impeccable: focus rings — visible 2px white ring on dark */
+:focus-visible { outline: 2px solid #fafafa; outline-offset: 2px; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #fafafa; outline-offset: 2px; }
+
+/* Mobile thumb-reach: bottom safe area */
+@supports (padding: max(0px)) {
+  .pb-safe { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+}

@@ -1,9 +1,11 @@
 "use client";
 import { useCallback, useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UploadCloud, File as FileIcon, X, Link2, Copy, Check, Mail, Send, AlertCircle } from "lucide-react";
+import { pushTransfer } from "@/lib/offline-history";
 
 export function TransferDropzone() {
   const [files, setFiles] = useState<File[]>([]);
@@ -157,6 +159,12 @@ export function TransferDropzone() {
 
       setShareUrl(data.transferUrl || `${window.location.origin}/d/mock123`);
       setEmailResults(data.emailResults || null);
+      // offline cache for history
+      try {
+        const tid = data.transferId || data.transferUrl?.split("/d/").pop() || Math.random().toString(36).slice(2,8);
+        const turl = data.transferUrl?.split("/d/").pop() || tid;
+        pushTransfer({ id: tid, transferUrl: turl, files: files.map((f) => ({ name: f.name, size: f.size })), expiresAt: data.expiresAt || new Date(Date.now() + 4*86400000).toISOString(), createdAt: new Date().toISOString() });
+      } catch {}
       console.log(`[transfer] done — shareUrl ${data.transferUrl}, emails:`, data.emailResults);
     } catch (e) {
       console.error("[transfer] upload error", e);
@@ -170,20 +178,21 @@ export function TransferDropzone() {
 
   if (shareUrl) {
     return (
-      <Card className="p-6 sm:p-8 text-center bg-[#121214] border-zinc-800 rounded-2xl shadow-sm">
-        <div className="mx-auto w-12 h-12 rounded-2xl bg-emerald-500 text-white grid place-items-center mb-4">
-          <Link2 className="h-6 w-6" />
-        </div>
-        <h3 className="font-semibold text-[15px] text-white">Transfer ready</h3>
-        <p className="text-sm text-zinc-400 font-mono mt-1">Expires in 4 days — share this link</p>
-        <div className="mt-4 flex items-center gap-2 max-w-md mx-auto">
-          <code className="flex-1 text-sm font-mono bg-zinc-900 border border-zinc-700 text-white rounded-xl px-3 py-2.5 truncate text-left">
-            {shareUrl}
-          </code>
-          <Button size="icon" variant="outline" className="rounded-xl shrink-0" onClick={async () => { await navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
-            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-          </Button>
-        </div>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15, ease: "easeOut" }}>
+        <Card className="p-6 sm:p-8 text-center bg-[#121214] border-zinc-800 rounded-2xl shadow-sm">
+          <div className="mx-auto w-12 h-12 rounded-2xl bg-emerald-500 text-white grid place-items-center mb-4">
+            <Link2 className="h-6 w-6" aria-hidden />
+          </div>
+          <h3 className="font-semibold text-[15px] text-white">Transfer ready</h3>
+          <p className="text-sm text-zinc-400 font-mono mt-1">Expires in 4 days — share this link</p>
+          <div className="mt-4 flex items-center gap-2 max-w-md mx-auto">
+            <code className="flex-1 text-sm font-mono bg-zinc-900 border border-zinc-700 text-white rounded-xl px-3 py-2.5 truncate text-left">
+              {shareUrl}
+            </code>
+            <Button size="icon" variant="outline" aria-label="Copy link" className="rounded-xl shrink-0" onClick={async () => { await navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+            </Button>
+          </div>
         {emailResults && emailResults.length > 0 && (
           <div className="mt-4 text-xs font-mono text-left max-w-md mx-auto bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-white">
             <div className="flex items-center gap-1.5 font-medium mb-1"><Mail className="h-3.5 w-3.5" /> Email delivery</div>
@@ -196,20 +205,26 @@ export function TransferDropzone() {
             {emailResults.some((r: any) => r.status === "skipped") && <p className="text-[11px] text-zinc-500 mt-2">SMTP not configured — set SMTP_* in .env to enable real emails. Link still works.</p>}
           </div>
         )}
-        <Button variant="ghost" className="mt-4 rounded-full" onClick={() => { setFiles([]); setShareUrl(null); setEmails([]); setEmailResults(null); }}>
-          Send another
-        </Button>
-      </Card>
+          <Button variant="ghost" className="mt-4 rounded-full" onClick={() => { setFiles([]); setShareUrl(null); setEmails([]); setEmailResults(null); }}>
+            Send another
+          </Button>
+        </Card>
+      </motion.div>
     );
   }
 
   return (
-    <Card
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={onDrop}
-      className={`p-6 sm:p-8 border-2 border-dashed rounded-2xl transition-all ${dragOver ? "border-white bg-zinc-900 scale-[1.01]" : "border-zinc-800 bg-[#121214]"}`}
+    <motion.div
+      animate={{ scale: dragOver ? 1.01 : 1 }}
+      transition={{ duration: 0.15, ease: "easeOut" }}
+      className="motion-safe"
     >
+      <Card
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        className={`p-6 sm:p-8 border-2 border-dashed rounded-2xl transition-colors duration-150 ${dragOver ? "border-white bg-zinc-900" : "border-zinc-800 bg-[#121214]"}`}
+      >
       <div className="text-center">
         <div className="mx-auto w-12 h-12 rounded-2xl bg-white text-zinc-900 grid place-items-center mb-3 shadow-sm">
           <UploadCloud className="h-6 w-6" />
@@ -265,29 +280,34 @@ export function TransferDropzone() {
             <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Message — optional" rows={2} className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-white font-sans" />
           </div>
 
-          {error && <p className="text-sm text-red-400 font-mono flex items-center gap-1 bg-red-950/30 border border-red-900 rounded-xl px-3 py-2"><AlertCircle className="h-4 w-4" /> {error}</p>}
-          {isSameEmail && !error && <p className="text-sm text-red-400 font-mono flex items-center gap-1 bg-red-950/30 border border-red-900 rounded-xl px-3 py-2"><AlertCircle className="h-4 w-4" /> Sender and recipient must be different</p>}
+          <AnimatePresence>
+            {error && <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="text-sm text-red-400 font-mono flex items-center gap-1 bg-red-950/30 border border-red-900 rounded-xl px-3 py-2" role="alert"><AlertCircle className="h-4 w-4" aria-hidden /> {error}</motion.p>}
+            {isSameEmail && !error && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-sm text-red-400 font-mono flex items-center gap-1 bg-red-950/30 border border-red-900 rounded-xl px-3 py-2"><AlertCircle className="h-4 w-4" aria-hidden /> Sender and recipient must be different</motion.p>}
+          </AnimatePresence>
           {uploading && (
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-3 space-y-2">
               <div className="flex justify-between text-xs font-mono">
                 <span className="text-zinc-400">Uploading...</span>
-                <span className="text-white">{formatMB(uploadedBytes)} / {formatMB(totalSize)} MB • {uploadProgress}%</span>
+                <span className="text-white" aria-live="polite">{formatMB(uploadedBytes)} / {formatMB(totalSize)} MB • {uploadProgress}%</span>
               </div>
               <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
-                <div className="h-full bg-white rounded-full transition-all duration-200" style={{ width: `${uploadProgress}%` }} />
+                <motion.div className="h-full bg-white rounded-full" initial={{ width: 0 }} animate={{ width: `${uploadProgress}%` }} transition={{ duration: 0.15, ease: "easeOut" }} style={{ willChange: "width" }} />
               </div>
             </div>
           )}
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => { if (uploading) handleCancel(); else { setFiles([]); setEmails([]); setEmailError(null); setError(null); setUploadProgress(0); setUploadedBytes(0); } }} className="flex-1 rounded-full h-11 gap-2">
+            <Button variant="outline" onClick={() => { if (uploading) handleCancel(); else { setFiles([]); setEmails([]); setEmailError(null); setError(null); setUploadProgress(0); setUploadedBytes(0); } }} className="flex-1 rounded-full h-11 gap-2 min-h-[44px]">
               {uploading ? "Cancel upload" : "Cancel"}
             </Button>
-            <Button onClick={handleUpload} disabled={uploading || !canTransfer || isSameEmail} className="flex-1 rounded-full h-11 gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-              {uploading ? `${uploadProgress}%` : <><Send className="h-4 w-4" /> Transfer</>}
-            </Button>
+            <motion.div whileTap={{ scale: 0.98 }} transition={{ duration: 0.15, ease: "easeOut" }} className="flex-1">
+              <Button onClick={handleUpload} disabled={uploading || !canTransfer || isSameEmail} className="w-full rounded-full h-11 gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]">
+                {uploading ? `${uploadProgress}%` : <><Send className="h-4 w-4" aria-hidden /> Transfer</>}
+              </Button>
+            </motion.div>
           </div>
         </div>
       )}
-    </Card>
+      </Card>
+    </motion.div>
   );
 }

@@ -1,10 +1,12 @@
 "use client";
 import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Header } from "@/components/Header";
 import { LinkInput } from "@/components/LinkInput";
 import { VideoGrid, DetectedVideo } from "@/components/VideoGrid";
 import { TransferDropzone } from "@/components/TransferDropzone";
-import { Sparkles } from "lucide-react";
+import { pushJob } from "@/lib/offline-history";
+import { InstallPrompt } from "@/components/InstallPrompt";
 
 export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
@@ -32,6 +34,15 @@ export default function Home() {
       })
       .catch((e) => console.warn("[cleanup] failed", e));
   }, []);
+
+  // Offline cache: persist completed jobs for history PWA
+  useEffect(() => {
+    if (!jobId || jobStatus !== "COMPLETED" || !videos.length) return;
+    try {
+      const first = videos[0] as any;
+      pushJob({ id: jobId, sourceUrl: first?.title || jobId, status: "COMPLETED", createdAt: new Date().toISOString(), thumbnail: first?.thumbnail });
+    } catch {}
+  }, [jobStatus, jobId, videos]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -122,16 +133,20 @@ export default function Home() {
 
             <div className="mt-8 w-full max-w-[760px] flex flex-col items-center">
               <div className="w-full flex flex-col items-center">
-                <div className="flex items-center justify-center gap-1 p-1 rounded-full bg-zinc-900 border border-zinc-800 w-fit">
+                <div className="flex items-center justify-center gap-1 p-1 rounded-full bg-zinc-900 border border-zinc-800 w-fit" role="tablist" aria-label="Mode">
                   <button
+                    role="tab"
+                    aria-selected={activeTab === "download"}
                     onClick={() => setActiveTab("download")}
-                    className={`px-4 py-2 rounded-full text-xs font-mono tracking-[0.14em] transition-colors ${activeTab === "download" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-400 hover:text-white"}`}
+                    className={`px-4 py-2 rounded-full text-xs font-mono tracking-[0.14em] transition-colors duration-150 min-h-[36px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${activeTab === "download" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-400 hover:text-white"}`}
                   >
                     VIDEO DETECT
                   </button>
                   <button
+                    role="tab"
+                    aria-selected={activeTab === "transfer"}
                     onClick={() => setActiveTab("transfer")}
-                    className={`px-4 py-2 rounded-full text-xs font-mono tracking-[0.14em] transition-colors ${activeTab === "transfer" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-400 hover:text-white"}`}
+                    className={`px-4 py-2 rounded-full text-xs font-mono tracking-[0.14em] transition-colors duration-150 min-h-[36px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${activeTab === "transfer" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-400 hover:text-white"}`}
                   >
                     SEND FILES
                   </button>
@@ -146,57 +161,72 @@ export default function Home() {
                         }}
                       />
                     </div>
-                    {(jobStatus === "PARSING" || jobStatus === "QUEUED") && (
-                      <div className="mt-4 w-full max-w-md">
-                        <div className="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1.5">
-                          <span className="flex items-center gap-1.5">
-                            {jobStatus === "PARSING"
-                              ? "Scanning page for video sources..."
-                              : "Queued — waiting for parser..."}{" "}
-                            <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" />
-                          </span>
-                          <span>{jobProgress}%</span>
-                        </div>
-                        <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden relative">
-                          <div
-                            className="h-full bg-white rounded-full transition-all duration-700 ease-out relative overflow-hidden"
-                            style={{ width: `${Math.max(8, jobProgress)}%` }}
-                          >
-                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shimmer_1.2s_infinite]" />
+                    <AnimatePresence>
+                      {(jobStatus === "PARSING" || jobStatus === "QUEUED") && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.15, ease: "easeOut" }}
+                          className="mt-4 w-full max-w-md"
+                        >
+                          <div className="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1.5">
+                            <span className="flex items-center gap-1.5" aria-live="polite">
+                              {jobStatus === "PARSING" ? "Scanning page for video sources..." : "Queued — waiting for parser..."}{" "}
+                              <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" aria-hidden />
+                            </span>
+                            <span>{jobProgress}%</span>
                           </div>
-                        </div>
-                      </div>
-                    )}
-                    {downloading && (
-                      <div className="mt-4 w-full max-w-md">
-                        <div className="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1.5">
-                          <span className="flex items-center gap-1.5">
-                            {downloading.progress < 85
-                              ? `Merging ${downloading.quality} with audio...`
-                              : `Uploading to R2...`}{" "}
-                            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                          </span>
-                          <span>{downloading.progress}%</span>
-                        </div>
-                        <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden relative">
-                          <div
-                            className="h-full bg-emerald-500 rounded-full transition-all duration-700 ease-out relative overflow-hidden"
-                            style={{ width: `${downloading.progress}%` }}
-                          >
-                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shimmer_1.2s_infinite]" />
+                          <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden relative">
+                            <motion.div
+                              className="h-full bg-white rounded-full relative overflow-hidden will-change-transform"
+                              initial={{ width: "8%" }}
+                              animate={{ width: `${Math.max(8, jobProgress)}%` }}
+                              transition={{ duration: 0.7, ease: "easeOut" }}
+                            >
+                              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shimmer_1.2s_infinite]" />
+                            </motion.div>
                           </div>
-                        </div>
-                        <p className="text-[11px] font-mono text-zinc-500 mt-1 text-center">
-                          {downloading.progress < 30
-                            ? "Downloading video..."
-                            : downloading.progress < 60
-                              ? "Downloading audio + merging with ffmpeg..."
-                              : downloading.progress < 85
-                                ? "Finalizing merge..."
-                                : "Uploading to R2 (fast CDN)..."}
-                        </p>
-                      </div>
-                    )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                    <AnimatePresence>
+                      {downloading && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.15, ease: "easeOut" }}
+                          className="mt-4 w-full max-w-md"
+                        >
+                          <div className="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1.5">
+                            <span className="flex items-center gap-1.5" aria-live="polite">
+                              {downloading.progress < 85 ? `Merging ${downloading.quality} with audio...` : `Uploading to R2...`}{" "}
+                              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" aria-hidden />
+                            </span>
+                            <span>{downloading.progress}%</span>
+                          </div>
+                          <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden relative">
+                            <motion.div
+                              className="h-full bg-emerald-500 rounded-full relative overflow-hidden will-change-transform"
+                              animate={{ width: `${downloading.progress}%` }}
+                              transition={{ duration: 0.7, ease: "easeOut" }}
+                            >
+                              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shimmer_1.2s_infinite]" />
+                            </motion.div>
+                          </div>
+                          <p className="text-[11px] font-mono text-zinc-500 mt-1 text-center">
+                            {downloading.progress < 30
+                              ? "Downloading video..."
+                              : downloading.progress < 60
+                                ? "Downloading audio + merging with ffmpeg..."
+                                : downloading.progress < 85
+                                  ? "Finalizing merge..."
+                                  : "Uploading to R2 (fast CDN)..."}
+                          </p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                     <VideoGrid
                       videos={videos}
                       jobId={jobId}
@@ -379,10 +409,10 @@ export default function Home() {
         </div>
       )}
 
-      <footer className="border-t border-zinc-800 py-6 mt-auto">
+      <footer className="border-t border-zinc-800 py-6 mt-auto pb-safe">
         <div className="mx-auto max-w-[1120px] px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono text-zinc-500">
           <span className="text-center text-white sm:text-left">
-            © 2026 SPEEDDL
+            © 2026 SPEEDDL • PWA ready
           </span>
           <span className="flex items-center justify-center gap-2 shrink-0">
             <span className="px-2 py-1  text-white text-[11px]">
@@ -391,6 +421,7 @@ export default function Home() {
           </span>
         </div>
       </footer>
+      <InstallPrompt />
     </div>
   );
 }

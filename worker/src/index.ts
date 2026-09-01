@@ -6,6 +6,17 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import fs from "fs";
 import path from "path";
 import os from "os";
+// Optional Sentry for worker — enabled if SENTRY_DSN set
+try {
+  const dsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
+  if (dsn) {
+    // dynamic import so worker still runs without @sentry if removed
+    import("@sentry/nextjs").then((Sentry: any) => {
+      Sentry.init({ dsn, tracesSampleRate: 0.05, enabled: true });
+      console.log("[worker] Sentry enabled");
+    }).catch(() => {});
+  }
+} catch {}
 
 const prisma = new PrismaClient();
 const connection = process.env.REDIS_URL ? new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false }) : undefined;

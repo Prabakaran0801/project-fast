@@ -1,0 +1,24 @@
+{
+  "rules": [
+    {
+      "id": "merged-videos-30min",
+      "status": "Enabled",
+      "filter": { "prefix": "merged/" },
+      "expiration": { "days": 1 },
+      "abortIncompleteMultipartUpload": { "daysAfterInitiation": 1 }
+    },
+    {
+      "id": "transfers-4days",
+      "status": "Enabled",
+      "filter": { "prefix": "transfers/" },
+      "expiration": { "days": 4 },
+      "abortIncompleteMultipartUpload": { "daysAfterInitiation": 1 }
+    },
+    {
+      "id": "cleanup-expired-multipart",
+      "status": "Enabled",
+      "filter": { "prefix": "" },
+      "abortIncompleteMultipartUpload": { "daysAfterInitiation": 2 }
+    }
+  ]
+}

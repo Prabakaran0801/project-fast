@@ -1,0 +1,13 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "worker/Dockerfile"
+
+[deploy]
+startCommand = "node --loader tsx worker/src/index.ts"
+restartPolicyType = "onFailure"
+restartPolicyMaxRetries = 5
+healthcheckPath = "/api/health"
+healthcheckTimeout = 10
+
+[[services]]
+name = "worker"

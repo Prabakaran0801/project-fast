@@ -2,6 +2,7 @@ import { Header } from "@/components/Header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import prisma from "@/lib/prisma";
+import { HistoryOffline } from "@/components/HistoryOffline";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,7 @@ export default async function HistoryPage() {
             </Card>
           </div>
         </div>
+        <HistoryOffline serverHasData={jobs.length > 0 || transfers.length > 0} />
       </main>
     </div>
   );

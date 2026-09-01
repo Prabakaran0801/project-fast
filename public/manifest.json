@@ -1,0 +1,72 @@
+{
+  "name": "SpeedDL — Paste. Detect. Download fast.",
+  "short_name": "SpeedDL",
+  "description": "High-performance video downloader + WeTransfer-style file sharing. Auto-detect videos, direct CDN delivery, resumable 5GB uploads.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "orientation": "portrait-primary",
+  "categories": ["utilities", "productivity"],
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "narrow"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Video Detect",
+      "url": "/#download",
+      "description": "Paste URL and detect videos",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Send Files",
+      "url": "/#transfer",
+      "description": "WeTransfer-style sharing",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "History",
+      "url": "/history",
+      "description": "Download history",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
+  "handle_links": "preferred",
+  "launch_handler": { "client_mode": "auto" },
+  "edge_side_panel": { "preferred_width": 400 }
+}
