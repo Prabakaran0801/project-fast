@@ -12,11 +12,21 @@ import http from "http";
 // Local dev: Next.js on :3000, worker on :3001 (avoid EADDRINUSE)
 const keepPort = Number(process.env.WORKER_PORT || 3001);
 const isCombinedRender = process.env.PORT === "3000" && !process.env.WORKER_PORT;
+function startKeepAlive(port: number, label: string) {
+  const srv = http.createServer((_, res) => { res.writeHead(200, { "Content-Type": "text/plain" }); res.end("mediamover worker ok"); });
+  srv.on("error", (err: any) => {
+    if (err?.code === "EADDRINUSE") {
+      console.warn(`[keepalive] :${port} in use (${label}) — skip (worker still runs)`);
+    } else {
+      console.error(`[keepalive] failed :${port}`, err);
+    }
+  });
+  srv.listen(port, () => console.log(`[keepalive] worker http :${port} (${label})`));
+}
 if (isCombinedRender) {
-  // Render single container: Next handles :3000, worker keepalive on :3001 separately (still available for checks)
-  http.createServer((_, res) => { res.writeHead(200, { "Content-Type": "text/plain" }); res.end("mediamover worker ok"); }).listen(keepPort, () => console.log(`[keepalive] worker http :${keepPort} (combined mode, Next is :3000)`));
+  startKeepAlive(keepPort, "combined mode, Next is :3000");
 } else {
-  http.createServer((_, res) => { res.writeHead(200, { "Content-Type": "text/plain" }); res.end("mediamover worker ok"); }).listen(keepPort, () => console.log(`[keepalive] http :${keepPort} for UptimeRobot`));
+  startKeepAlive(keepPort, "UptimeRobot");
 }
 // Optional Sentry for worker — enabled if SENTRY_DSN set
 try {
@@ -61,10 +71,14 @@ function pickAllFormats(info: any, max = 8) {
     f.ext === "m3u8" ||
     String(f.url || "").includes(".m3u8") ||
     String(f.url || "").includes("manifest.googlevideo.com");
+  const isStoryboard = (f: any) => f.ext === "mhtml" || f.protocol === "mhtml" || String(f.format_id || "").startsWith("sb") || String(f.format_note || "").toLowerCase().includes("storyboard");
   // Group by height, keep best per height, prefer mp4, mark if needs merge (video-only)
   const byHeight = new Map<number, any>();
   for (const f of formats) {
     if (!f.url || !f.height || isHls(f)) continue;
+    if (isStoryboard(f)) continue;
+    if (f.height < 144) continue;
+    if (f.ext === "mhtml") continue;
     const h = f.height;
     const existing = byHeight.get(h);
     // Prefer muxed (has audio) over video-only, and mp4 over webm
@@ -94,7 +108,7 @@ function pickAllFormats(info: any, max = 8) {
   }));
 }
 
-async function mergeHighRes(url: string, targetHeight: number, jobId: string): Promise<string> {
+async function mergeHighRes(url: string, targetHeight: number, jobId: string, onProgress?: (p: number) => void): Promise<string> {
   // Use yt-dlp to download bestvideo[height=target] + bestaudio and merge via ffmpeg, upload to R2
   const s3 = getS3();
   if (!s3) throw new Error("S3 not configured — set S3_* in .env to enable 1080p+ merging");
@@ -104,6 +118,8 @@ async function mergeHighRes(url: string, targetHeight: number, jobId: string): P
   console.log(`[merge] ${jobId} ${targetHeight}p -> yt-dlp download + ffmpeg merge to ${outPath}`);
 
   const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
+  // Real progress: try to parse yt-dlp --newline output, fallback to timing
+  onProgress?.(40);
   // Download bestvideo at height + bestaudio, merge to mp4
   await ytdlp(url, {
     format: `bestvideo[height=${targetHeight}][ext=mp4]+bestaudio/bestvideo[height=${targetHeight}]+bestaudio/best`,
@@ -112,6 +128,7 @@ async function mergeHighRes(url: string, targetHeight: number, jobId: string): P
     noPlaylist: true,
     noWarnings: true,
   } as any);
+  onProgress?.(70);
 
   if (!fs.existsSync(outPath)) {
     // yt-dlp may output with different name if ext differs, find file
@@ -122,6 +139,7 @@ async function mergeHighRes(url: string, targetHeight: number, jobId: string): P
     if (foundPath !== outPath) fs.renameSync(foundPath, outPath);
   }
 
+  onProgress?.(80);
   const body = fs.readFileSync(outPath);
   const key = `merged/${jobId}/${targetHeight}p-${Date.now()}.mp4`;
   // 30 min expiry for prod (was 60s testing)
@@ -136,6 +154,7 @@ async function mergeHighRes(url: string, targetHeight: number, jobId: string): P
       Expires: new Date(Date.now() + TEST_EXPIRE_SEC * 1000),
     })
   );
+  onProgress?.(90);
   fs.rmSync(tmpDir, { recursive: true, force: true });
   const rawPublic = process.env.S3_PUBLIC_URL?.trim();
   const publicUrl = rawPublic && !rawPublic.includes("yourdomain.com") ? rawPublic.replace(/\/$/, "") : "";
@@ -161,57 +180,160 @@ const parseWorker = new Worker(
       let detected: any[] = [];
       let pageTitle = "";
 
-      try {
-        const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }, signal: AbortSignal.timeout(10000) });
-        if (res.ok) {
+      // --- robust cheerio crawl (fpo.xxx / wowxxx need full browser headers + 15s timeout + retry) ---
+      const cheerioHeaders: Record<string, string> = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        Referer: (() => { try { return new URL(url).origin + "/"; } catch { return "https://www.fpo.xxx/"; } })(),
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Upgrade-Insecure-Requests": "1",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      };
+      async function fetchHtml(target: string, timeoutMs: number) {
+        return fetch(target, { headers: cheerioHeaders, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+      }
+      for (let attempt = 0; attempt < 2 && detected.length === 0; attempt++) {
+        try {
+          const res = await fetchHtml(url, 15000);
+          if (!res.ok) {
+            console.warn(`[parse] cheerio http ${res.status} ${res.headers.get("cf-mitigated") || ""} for ${jobId}`);
+            if (attempt === 0 && (res.status === 403 || res.status === 429 || res.status === 503)) {
+              await new Promise((r) => setTimeout(r, 800));
+              continue;
+            }
+            break;
+          }
           const html = await res.text();
           const $ = cheerio.load(html);
           pageTitle = $("title").first().text().trim().slice(0, 120);
-          $("video source, video, meta[property='og:video'], meta[property='og:video:secure_url']").each((_, el) => {
-            const src = $(el).attr("src") || $(el).attr("content") || $(el).attr("srcset");
-            if (src && !src.startsWith("blob:")) {
+          $("video source, video, meta[property='og:video'], meta[property='og:video:secure_url'], source[src], [data-src], [data-video-url]").each((_, el) => {
+            const src = $(el).attr("src") || $(el).attr("content") || $(el).attr("srcset") || $(el).attr("data-src") || $(el).attr("data-video-url");
+            if (src && !src.startsWith("blob:") && !src.startsWith("data:")) {
               try {
                 const abs = new URL(src, url).toString();
-                const ext = abs.split(".").pop()?.split("?")[0] || "mp4";
-                if (["mp4", "webm", "mov"].includes(ext)) detected.push({ url: abs, quality: "auto", ext, thumbnail: "", hasAudio: true, needsMerge: false });
+                const ext = abs.split(".").pop()?.split("?")[0]?.toLowerCase() || "mp4";
+                if (["mp4", "webm", "mov", "m3u8"].includes(ext)) detected.push({ url: abs, quality: "auto", ext, thumbnail: "", hasAudio: true, needsMerge: false });
               } catch {}
             }
           });
-          if (detected.length) console.log(`[parse] cheerio found ${detected.length} sources for ${jobId}`);
+          if (detected.length === 0) {
+            const patterns = [
+              /["']contentUrl["']\s*:\s*["']([^"']+\.(?:mp4|m3u8)[^"']*)["']/gi,
+              /["']video_url["']\s*:\s*["']([^"']+)["']/gi,
+              /source\s*src\s*=\s*["']([^"']+\.(?:mp4|m3u8)[^"']*)["']/gi,
+              /https?:\/\/[^"' \s]+\.(?:mp4|m3u8)[^"' \s]*/gi,
+            ];
+            const seenUrl = new Set<string>();
+            for (const re of patterns) {
+              let m: RegExpExecArray | null;
+              re.lastIndex = 0;
+              while ((m = re.exec(html)) !== null) {
+                const raw = m[1] || m[0];
+                const cleaned = raw.replace(/\\u002F/g, "/").replace(/\\\//g, "/");
+                if (!cleaned || seenUrl.has(cleaned) || cleaned.startsWith("blob:")) continue;
+                seenUrl.add(cleaned);
+                try {
+                  const abs = new URL(cleaned, url).toString();
+                  const ext = abs.split(".").pop()?.split("?")[0]?.toLowerCase() || "mp4";
+                  if (["mp4", "webm", "mov", "m3u8"].includes(ext)) {
+                    detected.push({ url: abs, quality: "auto", ext, thumbnail: "", hasAudio: true, needsMerge: false });
+                    if (detected.length >= 3) break;
+                  }
+                } catch {}
+              }
+              if (detected.length) break;
+            }
+            if (detected.length) console.log(`[parse] cheerio regex found ${detected.length} for ${jobId} (attempt ${attempt + 1})`);
+          }
+          if (detected.length) console.log(`[parse] cheerio found ${detected.length} sources for ${jobId} (attempt ${attempt + 1})`);
+          break;
+        } catch (e: any) {
+          const isTimeout = e?.name === "TimeoutError" || String(e).includes("TimeoutError") || String(e).includes("aborted");
+          console.warn(`[parse] cheerio ${isTimeout ? "timeout" : "failed"} ${jobId} attempt ${attempt + 1}`, String(e).slice(0, 220));
+          if (isTimeout && attempt === 0) {
+            await new Promise((r) => setTimeout(r, 900));
+            continue;
+          }
+          break;
         }
-      } catch (e) {
-        console.warn("[parse] cheerio crawl failed", String(e).slice(0, 200));
       }
 
-      const needsYtdlp = detected.length === 0 || /youtube\.com|youtu\.be|tiktok\.com|instagram\.com|twitter\.com|x\.com|vimeo\.com|twitch\.tv/.test(url);
+      const isYoutube = /youtube\.com|youtu\.be/.test(url);
+      const isGenericVideoSite = /youtube\.com|youtu\.be|tiktok\.com|instagram\.com|twitter\.com|x\.com|vimeo\.com|twitch\.tv|fpo\.xxx|wowxxx|pornhub|xvideos|xhamster|redtube|youjizz|missav/.test(url);
+      const needsYtdlp = detected.length === 0 || isGenericVideoSite;
       if (needsYtdlp) {
-        // Try multiple clients — Replit datacenter IPs need fallback (android→web→ios) + cookies
-        const clients = ["android", "web", "ios", "tv"];
-        // eslint-disable-next-line no-labels
-        for (const client of clients) {
+        // Generic attempt for fpo.xxx/wowxxx etc (no youtube player_client)
+        // For twitter/instagram/tiktok always prefer yt-dlp over cheerio (cheerio gives bare video.twimg.com 403 links)
+        const preferYtdlpOverCheerio = /twitter\.com|x\.com|instagram\.com|tiktok\.com/.test(url);
+        if (!isYoutube && (detected.length === 0 || preferYtdlpOverCheerio)) {
+          const urlsToTry = [url];
           try {
-            const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
-            const cookiesPath = process.env.YTDLP_COOKIES || (fs.existsSync(path.join(process.cwd(), "cookies.txt")) ? path.join(process.cwd(), "cookies.txt") : undefined);
-            const args: any = {
-              dumpSingleJson: true,
-              noPlaylist: true,
-              noWarnings: true,
-              preferFreeFormats: true,
-              ...(cookiesPath ? { cookies: cookiesPath } : {}),
-            };
-            // android/ios need extractorArgs, web/tv work without but add for consistency
-            if (client !== "web") args.extractorArgs = `youtube:player_client=${client}`;
-            const info: any = await ytdlp(url, args);
-            const formats = pickAllFormats(info, 8);
-            if (formats.length) {
-              detected = formats;
-              console.log(`[parse] yt-dlp (${client}${cookiesPath ? "+cookies" : ""}) found ${formats.length} formats for ${jobId} title="${(info.title || pageTitle).slice(0, 60)}" heights=${formats.map((f: any) => f.quality).join(",")}`);
-              break;
+            const u = new URL(url);
+            if (u.hostname.includes("instagram.com")) {
+              u.search = "";
+              const clean = u.toString();
+              if (clean !== url) urlsToTry.push(clean);
             }
-          } catch (e: any) {
-            console.warn(`[parse] yt-dlp (${client}) failed`, String(e?.message || e).slice(0, 180));
-            if (client === clients[clients.length - 1]) console.warn("[parse] yt-dlp-exec failed", String(e?.message || e).slice(0, 300));
+          } catch {}
+          let found: any[] | null = null;
+          for (const tryUrl of urlsToTry) {
+            for (const useFree of [true, false] as const) {
+              try {
+                const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
+                const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true } as any;
+                if (useFree) (args as any).preferFreeFormats = true;
+                const info: any = await ytdlp(tryUrl, args);
+                const formats = pickAllFormats(info, 8);
+                if (formats.length) {
+                  found = formats;
+                  console.log(`[parse] yt-dlp (generic) found ${formats.length} for ${jobId} ${tryUrl.slice(0,40)} ${useFree?"free":""} title="${(info.title || pageTitle).slice(0, 40)}" heights=${formats.map((f: any) => f.quality).join(",")}`);
+                  break;
+                }
+              } catch (e: any) {
+                const msg = String(e?.message || e);
+                console.warn(`[parse] yt-dlp (generic) failed ${tryUrl.slice(0,40)} ${useFree?"free":""}`, msg.slice(0, 180));
+                if (msg.includes("429") || msg.includes("rate")) await new Promise((r) => setTimeout(r, 900));
+              }
+            }
+            if (found) break;
           }
+          if (found) detected = found;
+          else if (preferYtdlpOverCheerio) console.warn(`[parse] yt-dlp (generic) no formats for ${url.slice(0,60)}`);
+        }
+        // Youtube multi-client - web first (android only 360p for vpzXg1jI5bc), keep best across clients
+        if (isYoutube || detected.length === 0) {
+          let best: any[] = detected;
+          const clients = ["web", "android", "ios", "tv"];
+          for (const withCookies of [false, true] as const) {
+            const cookiesPath = process.env.YTDLP_COOKIES || (fs.existsSync(path.join(process.cwd(), "cookies.txt")) ? path.join(process.cwd(), "cookies.txt") : undefined);
+            if (withCookies && !cookiesPath) continue;
+            for (const client of clients) {
+              if (!isYoutube) break;
+              for (const useFree of [true, false] as const) {
+                try {
+                  const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
+                  const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...(cookiesPath ? { cookies: cookiesPath } : {}) };
+                  if (useFree) (args as any).preferFreeFormats = true;
+                  if (client !== "web") args.extractorArgs = `youtube:player_client=${client}`;
+                  const info: any = await ytdlp(url, args);
+                  const formats = pickAllFormats(info, 8);
+                  if (formats.length > best.length) {
+                    best = formats;
+                    console.log(`[parse] yt-dlp (${client}${cookiesPath ? "+cookies" : ""}${useFree?" free":""}) found ${formats.length} for ${jobId} title="${(info.title || pageTitle).slice(0, 60)}" heights=${formats.map((f: any) => f.quality).join(",")}`);
+                  }
+                  if (best.length >= 4) break;
+                } catch (e: any) {
+                  console.warn(`[parse] yt-dlp (${client}${useFree?" free":""}) failed`, String(e?.message || e).slice(0, 180));
+                }
+              }
+              if (best.length >= 4) break;
+            }
+            if (best.length >= 4) break;
+          }
+          if (best.length) detected = best;
         }
       }
 
@@ -284,20 +406,22 @@ const parseWorker = new Worker(
         }
       }
 
-      if (detected.length === 0) detected = [{ url, quality: "auto", ext: "mp4", thumbnail: "", hasAudio: true, needsMerge: false }];
+      const isFailed = detected.length === 0;
+      const errCode = isYoutube ? "youtube_blocked" : "blocked_or_unsupported";
+      if (isFailed) detected = [{ url, quality: "auto", ext: "mp4", thumbnail: isYoutube ? `https://img.youtube.com/vi/${url.match(/(?:v=|\.be\/)([a-zA-Z0-9_-]{11})/)?.[1] || ""}/hqdefault.jpg` : "", hasAudio: false, needsMerge: false, _failed: true, error: errCode }];
 
       const seen = new Set<string>();
       detected = detected.filter((d: any) => (seen.has(d.quality) ? false : (seen.add(d.quality), true)));
-      // wowxxx/fpo already return muxed mp4 (hasAudio true) — direct download works (tested HEAD 200 with Referer), no need to force R2 merge
-      // only keep forced merge for legacy fpo if hasAudio was false (video-only) — already handled by hasAudio flag
+      // unify with processJob.ts: _failed flag + hasAudio:false so frontend shows_retry (worker previously hasAudio:true hid failure)
 
       // 30 min expiry
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
       await prisma.downloadJob.update({
         where: { id: jobId },
-        data: { detectedUrls: detected as any, status: "COMPLETED", progress: 100, expiresAt },
+        data: { detectedUrls: detected as any, status: isFailed ? "FAILED" : "COMPLETED", progress: 100, expiresAt },
       });
-      console.log(`[parse] ${jobId} completed with ${detected.length} sources expiresAt=${expiresAt.toISOString()}`);
+      if (isFailed) console.warn(`[parse] ${jobId} failed - no formats isYoutube=${isYoutube} ${isYoutube ? "youtube needs cookies" : "missav/pornhub blocked"}`);
+      else console.log(`[parse] ${jobId} completed with ${detected.length} sources expiresAt=${expiresAt.toISOString()}`);
     } catch (err) {
       console.error(`[parse] ${jobId} failed`, err);
       await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "FAILED" } });
@@ -315,24 +439,31 @@ const downloadWorker = new Worker(
     await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "DOWNLOADING", progress: 15 } });
     try {
       if (needsMerge && sourceUrl && height) {
-        // Granular progress to make UI feel fast
+        // TikTok/X are muxed - skip merge (instagram needs merge for audio to avoid silent video)
+        if (/tiktok\.com|twitter\.com|x\.com/.test(sourceUrl)) {
+          console.log(`[download] ${jobId} skip merge for social (muxed) -> direct`);
+          await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, fileUrl: url, expiresAt: new Date(Date.now() + 30 * 60 * 1000) } });
+          return;
+        }
+        // Real progress milestones (not dummy interval)
         await prisma.downloadJob.update({ where: { id: jobId }, data: { progress: 25 } });
+        console.log(`[download] ${jobId} yt-dlp start ${height}p`);
         const mergedUrl = await (async () => {
-          // Update progress during yt-dlp + ffmpeg stages
-          const progressInterval = setInterval(async () => {
-            try {
-              const j = await prisma.downloadJob.findUnique({ where: { id: jobId } });
-              const cur = j?.progress || 25;
-              if (cur < 85) await prisma.downloadJob.update({ where: { id: jobId }, data: { progress: Math.min(85, cur + 7) } });
-            } catch {}
-          }, 3000);
-          try {
-            const urlOut = await mergeHighRes(sourceUrl, height!, jobId);
-            clearInterval(progressInterval);
-            return urlOut;
-          } finally {
-            clearInterval(progressInterval);
-          }
+          // Update to 35 when yt-dlp starts, 65 after download, 85 after ffmpeg/upload
+          await prisma.downloadJob.update({ where: { id: jobId }, data: { progress: 35 } });
+          const timeoutMs = 90000;
+          const urlOut = await Promise.race([
+            (async () => {
+              const out = await mergeHighRes(sourceUrl, height!, jobId, async (p: number) => {
+                // mergeHighRes can report 35->70 for download, 70->85 for merge
+                try { await prisma.downloadJob.update({ where: { id: jobId }, data: { progress: p } }); } catch {}
+              });
+              return out;
+            })(),
+            new Promise<never>((_, rej) => setTimeout(() => rej(new Error("merge timeout 90s")), timeoutMs)),
+          ]);
+          await prisma.downloadJob.update({ where: { id: jobId }, data: { progress: 85 } });
+          return urlOut;
         })();
         const exp30m = new Date(Date.now() + 30 * 60 * 1000);
         await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, fileUrl: mergedUrl, expiresAt: exp30m } });
@@ -347,7 +478,7 @@ const downloadWorker = new Worker(
       await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, fileUrl: url, expiresAt: new Date(Date.now() + 30 * 60 * 1000) } });
     }
   },
-  { connection, concurrency: 1 } // merge is heavy, concurrency 1
+  { connection, concurrency: 2 } // was 1 - bump to 2 so instagram doesn't block queue
 );
 
 parseWorker.on("failed", (job: any, err: any) => console.error(`[parse] job ${job?.id} failed`, err));
