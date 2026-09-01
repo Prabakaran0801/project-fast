@@ -62,7 +62,7 @@ export default async function EmbedPage({ params, searchParams }: { params: Prom
         title={title}
       />
       <div className="absolute bottom-2 left-2 text-[10px] font-mono tracking-wide bg-black/60 text-white px-2 py-1 rounded-full backdrop-blur">
-        SPEEDDL EMBED • {job?.sourceUrl ? new URL(job.sourceUrl).hostname.replace("www.", "") : "video"}
+        MEDIAMOVER EMBED • {job?.sourceUrl ? new URL(job.sourceUrl).hostname.replace("www.", "") : "video"}
       </div>
     </div>
   );

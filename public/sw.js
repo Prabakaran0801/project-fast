@@ -1,6 +1,6 @@
-// SpeedDL SW — minimal offline cache (PWA Phase 3)
+// Mediamover SW — minimal offline cache (PWA Phase 3)
 // Cache-first for static, network-first for APIs/history
-const CACHE = "speeddl-v3";
+const CACHE = "mediamover-v1";
 const STATIC_ASSETS = ["/", "/history", "/manifest.json"];
 
 self.addEventListener("install", (e) => {

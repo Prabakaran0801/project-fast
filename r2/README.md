@@ -1,7 +1,7 @@
-# R2 Lifecycle — apply to Cloudflare bucket `project-speed`
+# R2 Lifecycle — apply to Cloudflare bucket `mediamover` (or `project-speed`)
 
 ## Web UI
-R2 -> bucket `project-speed` -> Settings -> Object Lifecycle -> Add rule
+R2 -> bucket `mediamover` -> Settings -> Object Lifecycle -> Add rule
 
 - `merged/*` -> Expire after **1 day** (DB keeps 30min, R2 keep 1d safety)
 - `transfers/*` -> Expire after **4 days** (matches DB `expiresAt = 4d`)
@@ -9,9 +9,9 @@ R2 -> bucket `project-speed` -> Settings -> Object Lifecycle -> Add rule
 
 ## Wrangler CLI
 ```bash
-npx wrangler r2 bucket lifecycle put project-speed --rules r2/lifecycle.json
+npx wrangler r2 bucket lifecycle put mediamover --rules r2/lifecycle.json
 # verify
-npx wrangler r2 bucket lifecycle get project-speed
+npx wrangler r2 bucket lifecycle get mediamover
 ```
 
 ## Vercel Cron (DB cleanup)

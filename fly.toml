@@ -1,4 +1,4 @@
-app = "speeddl-worker"
+app = "mediamover-worker"
 primary_region = "iad"
 
 [build]

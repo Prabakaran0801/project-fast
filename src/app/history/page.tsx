@@ -31,8 +31,9 @@ export default async function HistoryPage() {
           </h1>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-3">
+        {/* Download history hidden per request — keep code commented, only transfers shown */}
+        <div className="grid grid-cols-1 gap-6">
+          {/* <div className="lg:col-span-2 space-y-3">
             {jobs.length === 0 ? (
               <Card className="border-dashed border-zinc-800 bg-[#121214]">
                 <CardContent className="p-8 text-center text-sm font-mono text-zinc-500">
@@ -74,7 +75,7 @@ export default async function HistoryPage() {
                 </Card>
               ))
             )}
-          </div>
+          </div> */}
           <div>
             <Card className="bg-[#121214] border-zinc-800">
               <CardHeader>

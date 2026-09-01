@@ -13,16 +13,28 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Speed Downloader — Paste. Detect. Download fast.",
-  description: "High-performance video downloader + WeTransfer-style file sharing. Auto-detect videos from any URL, direct CDN delivery, resumable uploads.",
+  title: "Mediamover — Paste. Detect. Download fast.",
+  description:
+    "High-performance video downloader + MailTransfer-style file sharing. Auto-detect videos from any URL, direct CDN delivery, resumable uploads.",
   manifest: "/manifest.json",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "SpeedDL" },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Mediamover",
+  },
   icons: {
     icon: [
+      { url: "/logo.svg", type: "image/svg+xml" },
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    apple: [
+      {
+        url: "/icons/apple-touch-icon.png",
+        sizes: "180x180",
+        type: "image/png",
+      },
+    ],
   },
 };
 
@@ -41,15 +53,31 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
         <meta name="theme-color" content="#09090b" />
         <link rel="manifest" href="/manifest.json" />
+        <link rel="icon" href="/logo.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
       </head>
-      <body suppressHydrationWarning className="min-h-full flex flex-col bg-[#09090b] text-zinc-100">
-        <script dangerouslySetInnerHTML={{ __html: `try{document.querySelectorAll('[bis_skin_checked]').forEach(e=>e.removeAttribute('bis_skin_checked'))}catch{}` }} />
-        <script dangerouslySetInnerHTML={{ __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}))}` }} />
-        {children}</body>
+      <body
+        suppressHydrationWarning
+        className="min-h-full flex flex-col bg-[#09090b] text-zinc-100"
+      >
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{document.querySelectorAll('[bis_skin_checked]').forEach(e=>e.removeAttribute('bis_skin_checked'))}catch{}`,
+          }}
+        />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}))}`,
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }

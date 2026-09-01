@@ -87,7 +87,7 @@ async function mergeHighRes(url: string, targetHeight: number, jobId: string): P
   const s3 = getS3();
   if (!s3) throw new Error("S3 not configured — set S3_* in .env to enable 1080p+ merging");
   const bucket = process.env.S3_BUCKET!;
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `speeddl-${jobId}-`));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `mediamover-${jobId}-`));
   const outPath = path.join(tmpDir, `${targetHeight}p.mp4`);
   console.log(`[merge] ${jobId} ${targetHeight}p -> yt-dlp download + ffmpeg merge to ${outPath}`);
 

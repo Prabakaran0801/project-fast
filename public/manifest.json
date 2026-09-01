@@ -1,7 +1,7 @@
 {
-  "name": "SpeedDL — Paste. Detect. Download fast.",
-  "short_name": "SpeedDL",
-  "description": "High-performance video downloader + WeTransfer-style file sharing. Auto-detect videos, direct CDN delivery, resumable 5GB uploads.",
+  "name": "Mediamover — Paste. Detect. Download fast.",
+  "short_name": "Mediamover",
+  "description": "High-performance video downloader + MailTransfer-style file sharing. Auto-detect videos, direct CDN delivery, resumable 5GB uploads.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -13,6 +13,12 @@
   "lang": "en",
   "dir": "ltr",
   "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",
@@ -51,19 +57,37 @@
       "name": "Video Detect",
       "url": "/#download",
       "description": "Paste URL and detect videos",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     },
     {
       "name": "Send Files",
       "url": "/#transfer",
-      "description": "WeTransfer-style sharing",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "description": "MailTransfer-style sharing",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     },
     {
       "name": "History",
       "url": "/history",
       "description": "Download history",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ],
   "handle_links": "preferred",

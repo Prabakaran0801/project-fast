@@ -1,4 +1,4 @@
-// Prisma schema for Speed Downloader — Supabase Postgres (free tier)
+// Prisma schema for Mediamover — Supabase Postgres (free tier)
 generator client {
   provider = "prisma-client-js"
 }

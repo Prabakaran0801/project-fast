@@ -1,8 +1,8 @@
 "use client";
 
 // Offline history: mirrors successful parses/transfers to localStorage so /history works offline
-const KEY_JOBS = "speeddl:jobs";
-const KEY_TRANSFERS = "speeddl:transfers";
+const KEY_JOBS = "mediamover:jobs";
+const KEY_TRANSFERS = "mediamover:transfers";
 
 export type CachedJob = { id: string; sourceUrl: string; status: string; createdAt: string; thumbnail?: string };
 export type CachedTransfer = { id: string; transferUrl: string; files: { name: string; size: number }[]; expiresAt: string; createdAt: string };

@@ -40,7 +40,13 @@ export default function Home() {
     if (!jobId || jobStatus !== "COMPLETED" || !videos.length) return;
     try {
       const first = videos[0] as any;
-      pushJob({ id: jobId, sourceUrl: first?.title || jobId, status: "COMPLETED", createdAt: new Date().toISOString(), thumbnail: first?.thumbnail });
+      pushJob({
+        id: jobId,
+        sourceUrl: first?.title || jobId,
+        status: "COMPLETED",
+        createdAt: new Date().toISOString(),
+        thumbnail: first?.thumbnail,
+      });
     } catch {}
   }, [jobStatus, jobId, videos]);
 
@@ -126,14 +132,18 @@ export default function Home() {
               </h1>
               <p className="mt-4 text-[15px] leading-6 text-zinc-400 max-w-[560px] mx-auto text-center">
                 Auto-detect videos from any URL. Direct CDN delivery — no
-                bottleneck. Or send large files like WeTransfer — resumable,
+                bottleneck. Or send large files like MailTransfer — resumable,
                 expiring, now with email.
               </p>
             </div>
 
             <div className="mt-8 w-full max-w-[760px] flex flex-col items-center">
               <div className="w-full flex flex-col items-center">
-                <div className="flex items-center justify-center gap-1 p-1 rounded-full bg-zinc-900 border border-zinc-800 w-fit" role="tablist" aria-label="Mode">
+                <div
+                  className="flex items-center justify-center gap-1 p-1 rounded-full bg-zinc-900 border border-zinc-800 w-fit"
+                  role="tablist"
+                  aria-label="Mode"
+                >
                   <button
                     role="tab"
                     aria-selected={activeTab === "download"}
@@ -171,9 +181,17 @@ export default function Home() {
                           className="mt-4 w-full max-w-md"
                         >
                           <div className="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1.5">
-                            <span className="flex items-center gap-1.5" aria-live="polite">
-                              {jobStatus === "PARSING" ? "Scanning page for video sources..." : "Queued — waiting for parser..."}{" "}
-                              <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" aria-hidden />
+                            <span
+                              className="flex items-center gap-1.5"
+                              aria-live="polite"
+                            >
+                              {jobStatus === "PARSING"
+                                ? "Scanning page for video sources..."
+                                : "Queued — waiting for parser..."}{" "}
+                              <span
+                                className="inline-block h-2 w-2 rounded-full bg-white animate-pulse"
+                                aria-hidden
+                              />
                             </span>
                             <span>{jobProgress}%</span>
                           </div>
@@ -181,7 +199,9 @@ export default function Home() {
                             <motion.div
                               className="h-full bg-white rounded-full relative overflow-hidden will-change-transform"
                               initial={{ width: "8%" }}
-                              animate={{ width: `${Math.max(8, jobProgress)}%` }}
+                              animate={{
+                                width: `${Math.max(8, jobProgress)}%`,
+                              }}
                               transition={{ duration: 0.7, ease: "easeOut" }}
                             >
                               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shimmer_1.2s_infinite]" />
@@ -200,9 +220,17 @@ export default function Home() {
                           className="mt-4 w-full max-w-md"
                         >
                           <div className="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1.5">
-                            <span className="flex items-center gap-1.5" aria-live="polite">
-                              {downloading.progress < 85 ? `Merging ${downloading.quality} with audio...` : `Uploading to R2...`}{" "}
-                              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" aria-hidden />
+                            <span
+                              className="flex items-center gap-1.5"
+                              aria-live="polite"
+                            >
+                              {downloading.progress < 85
+                                ? `Merging ${downloading.quality} with audio...`
+                                : `Uploading to R2...`}{" "}
+                              <span
+                                className="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse"
+                                aria-hidden
+                              />
                             </span>
                             <span>{downloading.progress}%</span>
                           </div>
@@ -412,7 +440,7 @@ export default function Home() {
       <footer className="border-t border-zinc-800 py-6 mt-auto pb-safe">
         <div className="mx-auto max-w-[1120px] px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono text-zinc-500">
           <span className="text-center text-white sm:text-left">
-            © 2026 SPEEDDL • PWA ready
+            © 2026 MEDIAMOVER • PWA ready for Mobile and Desktop •{" "}
           </span>
           <span className="flex items-center justify-center gap-2 shrink-0">
             <span className="px-2 py-1  text-white text-[11px]">

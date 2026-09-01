@@ -10,7 +10,7 @@ export function InstallPrompt() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (localStorage.getItem("speeddl:pwa-dismissed") === "1") return;
+    if (localStorage.getItem("mediamover:pwa-dismissed") === "1") return;
     const handler = (e: any) => {
       e.preventDefault();
       setDeferred(e);
@@ -50,19 +50,19 @@ export function InstallPrompt() {
           <Download className="h-4 w-4" aria-hidden />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-white">Install SpeedDL</p>
+          <p className="text-sm font-medium text-white">Install Mediamover</p>
           <p className="text-xs font-mono text-zinc-400 mt-0.5">Add to home screen for offline history & faster launches.</p>
           <div className="flex gap-2 mt-3">
             <Button size="sm" onClick={onInstall} className="rounded-full h-8 px-4 text-xs">
               {deferred ? "Install" : "How to install"}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => { setDismissed(true); localStorage.setItem("speeddl:pwa-dismissed", "1"); }} className="rounded-full h-8 px-3 text-xs">
+            <Button size="sm" variant="ghost" onClick={() => { setDismissed(true); localStorage.setItem("mediamover:pwa-dismissed", "1"); }} className="rounded-full h-8 px-3 text-xs">
               Not now
             </Button>
           </div>
           {!deferred && <p className="text-[11px] font-mono text-zinc-500 mt-2">iOS: Share → Add to Home Screen</p>}
         </div>
-        <button onClick={() => { setDismissed(true); localStorage.setItem("speeddl:pwa-dismissed", "1"); }} aria-label="Dismiss" className="p-1 rounded-full hover:bg-zinc-800 text-zinc-500 hover:text-white">
+        <button onClick={() => { setDismissed(true); localStorage.setItem("mediamover:pwa-dismissed", "1"); }} aria-label="Dismiss" className="p-1 rounded-full hover:bg-zinc-800 text-zinc-500 hover:text-white">
           <X className="h-4 w-4" />
         </button>
       </div>
