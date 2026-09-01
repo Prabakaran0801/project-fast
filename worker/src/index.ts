@@ -8,9 +8,16 @@ import path from "path";
 import os from "os";
 import http from "http";
 
-// Replit Free keepalive: tiny http so UptimeRobot can ping Replit *.replit.dev (or Vercel health)
-const keepPort = Number(process.env.PORT || 3000);
-http.createServer((_, res) => { res.writeHead(200, { "Content-Type": "text/plain" }); res.end("mediamover worker ok"); }).listen(keepPort, () => console.log(`[keepalive] http :${keepPort} for UptimeRobot`));
+// Keepalive http for standalone worker (Fly/Railway). On Render single container, Next.js owns PORT=3000 — worker uses 3001 or WORKER_PORT
+// Local dev: Next.js on :3000, worker on :3001 (avoid EADDRINUSE)
+const keepPort = Number(process.env.WORKER_PORT || 3001);
+const isCombinedRender = process.env.PORT === "3000" && !process.env.WORKER_PORT;
+if (isCombinedRender) {
+  // Render single container: Next handles :3000, worker keepalive on :3001 separately (still available for checks)
+  http.createServer((_, res) => { res.writeHead(200, { "Content-Type": "text/plain" }); res.end("mediamover worker ok"); }).listen(keepPort, () => console.log(`[keepalive] worker http :${keepPort} (combined mode, Next is :3000)`));
+} else {
+  http.createServer((_, res) => { res.writeHead(200, { "Content-Type": "text/plain" }); res.end("mediamover worker ok"); }).listen(keepPort, () => console.log(`[keepalive] http :${keepPort} for UptimeRobot`));
+}
 // Optional Sentry for worker — enabled if SENTRY_DSN set
 try {
   const dsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
@@ -281,8 +288,8 @@ const parseWorker = new Worker(
 
       const seen = new Set<string>();
       detected = detected.filter((d: any) => (seen.has(d.quality) ? false : (seen.add(d.quality), true)));
-      // fpo.xxx / wowxxx signed URLs 403/410 if direct — force R2 merge via worker (like local yt-dlp download)
-      if (/fpo\.xxx|wowxxx\.to/.test(url)) detected.forEach((d: any) => (d.needsMerge = true));
+      // wowxxx/fpo already return muxed mp4 (hasAudio true) — direct download works (tested HEAD 200 with Referer), no need to force R2 merge
+      // only keep forced merge for legacy fpo if hasAudio was false (video-only) — already handled by hasAudio flag
 
       // 30 min expiry
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);

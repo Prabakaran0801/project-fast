@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: mediamover
+    # Single deployment — your URL will be https://mediamover.onrender.com
+    # If name taken, Render auto-generates https://mediamover-xxxx.onrender.com
+    # Add custom domain in Dashboard -> Settings -> Custom Domains (CNAME -> mediamover.onrender.com, free SSL)
+    env: docker
+    dockerfilePath: ./Dockerfile.render
+    plan: free
+    region: singapore # closest to India, low latency
+    healthCheckPath: /api/health
+    autoDeploy: false # set true to auto-deploy on git push
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: NEXT_TELEMETRY_DISABLED
+        value: 1
+      # --- Set these in Render Dashboard -> Environment (required) ---
+      - key: DATABASE_URL
+        sync: false # Supabase Postgres: postgresql://...
+      - key: REDIS_URL
+        sync: false # Upstash Redis: rediss://default:TOKEN@host:6379
+      - key: S3_ENDPOINT
+        sync: false # R2: https://<account>.r2.cloudflarestorage.com
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_BUCKET
+        value: project-speed
+      - key: S3_REGION
+        value: auto
+      - key: S3_PUBLIC_URL
+        sync: false # e.g. https://pub-xxx.r2.dev or https://cdn.yourdomain.com
+      - key: NEXT_PUBLIC_SITE_URL
+        value: https://mediamover.onrender.com # change if you add custom domain
+      - key: YTDLP_COOKIES
+        sync: false # optional: paste Netscape cookies.txt content for YouTube 1080p
+      - key: SENTRY_DSN
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      # Keep Render from sleeping instantly (optional): ping /api/health every 10min via cron-job.org
+
+# Optional cron job for R2 cleanup (free on Render, 1/day is fine)
+#  - type: cron
+#    name: mediamover-cleanup
+#    env: docker
+#    dockerfilePath: ./Dockerfile.render
+#    schedule: "0 3 * * *"
+#    command: curl -X POST https://mediamover.onrender.com/api/cleanup -H "Authorization: Bearer $CRON_SECRET"

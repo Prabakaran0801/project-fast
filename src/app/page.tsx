@@ -19,6 +19,7 @@ export default function Home() {
     progress: number;
   } | null>(null);
   const [expiredVideo, setExpiredVideo] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
 
   // Global cleanup on reload — deletes all expired /merged files from R2 (console logged server side)
   useEffect(() => {
@@ -168,6 +169,7 @@ export default function Home() {
                         onDetect={(id) => {
                           setJobId(id);
                           setVideos([]);
+                          setParseError(null);
                         }}
                       />
                     </div>
@@ -260,6 +262,10 @@ export default function Home() {
                       jobId={jobId}
                       onDownload={async (v) => {
                         if (!jobId) return;
+                        if ((v as any)._failed) {
+                          setParseError("No downloadable formats found for this video. Try: 1) Direct mp4 link https://test-videos.co.uk/vids/sintel/trailer.mp4 (always works) 2) Different YouTube video (Shorts/live may require cookies) 3) Check terminal for [processJob] yt-dlp … failed reason.");
+                          return;
+                        }
                         const jobRes = await fetch(`/api/job/${jobId}`)
                           .then((r) => r.json())
                           .catch(() => null);
@@ -356,7 +362,16 @@ export default function Home() {
                       }}
                     />
                     <div className="w-full">
-                      {videos.length === 0 && jobStatus === "COMPLETED" && (
+                      {parseError && (
+                        <div className="mt-6 rounded-2xl border border-amber-900/50 bg-amber-950/20 p-4 text-left">
+                          <p className="text-sm font-medium text-amber-400">{typeof window !== "undefined" && window.location.hostname === "localhost" ? "Could not extract formats" : "YouTube blocked on Vercel Hobby"}</p>
+                          <p className="text-xs font-mono text-amber-200/80 mt-1">{parseError}</p>
+                          <p className="text-xs font-mono text-zinc-400 mt-3">Fix 1 — Quick demo: paste <button onClick={() => navigator.clipboard.writeText("https://test-videos.co.uk/vids/sintel/trailer.mp4")} className="underline">test mp4</button> • Works with preview + download.</p>
+                          <p className="text-xs font-mono text-zinc-400 mt-1">Fix 2 — YouTube: {typeof window !== "undefined" && window.location.hostname === "localhost" ? "Save the Netscape cookies to cookies.txt in project root (or set YTDLP_COOKIES in .env) → restart npm run dev. Check terminal for [processJob] yt-dlp ... failed." : <>Install &ldquo;Get cookies.txt LOCALLY&rdquo; → Export youtube.com → copy content → Vercel Dashboard → Env → <code className="px-1 py-0.5 bg-zinc-800 rounded">YTDLP_COOKIES</code> → paste → Redeploy. Or use Fly.io worker — different IP, no cookies needed.</>}</p>
+                          <button onClick={() => setParseError(null)} className="mt-3 h-8 px-4 rounded-full bg-zinc-800 text-white text-xs border border-zinc-700">Dismiss</button>
+                        </div>
+                      )}
+                      {videos.length === 0 && jobStatus === "COMPLETED" && !parseError && (
                         <p className="mt-6 text-center text-sm font-mono text-zinc-500">
                           No videos detected. Try a direct video URL.
                         </p>

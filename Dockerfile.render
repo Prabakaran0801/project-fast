@@ -1,0 +1,40 @@
+# Render Single Deployment — Next.js + BullMQ Worker + ffmpeg + yt-dlp (all in one)
+# How deployed URL looks: https://mediamover.onrender.com (or https://mediamover-xxxx.onrender.com)
+# Custom domain: set in Render Dashboard -> Settings -> Custom Domains -> CNAME to mediamover.onrender.com
+
+FROM node:20-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip ffmpeg ca-certificates curl \
+  && pip install --break-system-packages yt-dlp --no-cache-dir \
+  && yt-dlp --version \
+  && ffmpeg -version | head -n1 \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --ignore-scripts
+
+COPY prisma ./prisma
+RUN npx prisma generate
+
+COPY . .
+
+# Build Next.js (needs DATABASE_URL dummy for prisma generate at build, real URL at runtime via env)
+ARG DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+ENV DATABASE_URL=$DATABASE_URL
+# Disable Next telemetry during build
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+EXPOSE 3000
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV YT_DLP_PATH=/usr/local/bin/yt-dlp
+
+# Healthcheck for Render (hits /api/health which checks DB+Redis)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -fsS http://localhost:3000/api/health || exit 1
+
+# Single container runs both Next.js and BullMQ worker via concurrently
+# Worker uses REDIS_URL (Upstash rediss://) and S3_* (R2) from Render env vars
+CMD ["sh", "-c", "node --loader tsx worker/src/index.ts & npm start"]

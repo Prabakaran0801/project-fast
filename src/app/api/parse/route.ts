@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/ratelimit";
 import prisma from "@/lib/prisma";
+import { getQueue, QUEUE_NAMES } from "@/lib/queue";
 
 const schema = z.object({ url: z.string().min(1) });
 
@@ -85,7 +87,35 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ jobId: id, status: "COMPLETED", detectedUrls: mockVideos });
   }
 
-  // Vercel-only: no BullMQ/Redis — /api/cron/process (every minute) picks up QUEUED jobs
-  // Also try inline fast-path: if job is generic <video> page, client polls /api/job/[id] already
+  // Hybrid: if REDIS_URL + external worker running (local), enqueue — else use Vercel after() worker (single platform)
+  try {
+    const queue = getQueue(QUEUE_NAMES.PARSE);
+    if (queue) {
+      await queue.add("parse", { jobId: job.id, url }, { attempts: 2, backoff: { type: "exponential", delay: 2000 } });
+      console.log(`[parse] enqueued ${job.id} to external worker`);
+      return NextResponse.json({ jobId: job.id, status: "QUEUED" });
+    }
+  } catch (e) { console.warn("[parse] queue failed, using after()", String(e).slice(0,120)); }
+
+  // Vercel-only after() — direct call avoids self-fetch loop in dev, same as worker file
+  try {
+    const jobId = job.id;
+    const jobUrl = url;
+    after(async () => {
+      try {
+        const { processSingleJob } = await import("@/lib/processJob");
+        // Claim job to avoid double process with GET /api/job polling fallback
+        const claimed = await prisma.downloadJob.updateMany({ where: { id: jobId, status: "QUEUED" }, data: { status: "PARSING", progress: 10 } });
+        if (claimed.count === 0) {
+          console.log(`[parse] after() skip ${jobId} already claimed`);
+          return;
+        }
+        await processSingleJob(jobId, jobUrl);
+        console.log(`[parse] after() completed ${jobId}`);
+      } catch (e) { console.warn(`[parse] after() failed for ${job.id}`, String(e).slice(0,200)); }
+    });
+  } catch (e) {
+    console.warn("[parse] after() not available, job will be processed on first GET /api/job poll", String(e).slice(0,120));
+  }
   return NextResponse.json({ jobId: job.id, status: "QUEUED" });
 }

@@ -26,8 +26,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   try {
     let job = await prisma.downloadJob.findUnique({ where: { id } });
     if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    // Hobby fix: Vercel Hobby only allows 1 cron/day, so process inline on poll
-    // Frontend polls every 2s — this makes QUEUED -> COMPLETED without cron
+    // Fallback inline if after() worker hasn't claimed job yet (Hobby without QStash)
+    // after() in POST /api/parse triggers POST /api/worker/process in background
     if (job.status === "QUEUED") {
       try {
         // Guard against thundering herd: try to claim job via status PARSING
