@@ -6,6 +6,11 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import http from "http";
+
+// Replit Free keepalive: tiny http so UptimeRobot can ping Replit *.replit.dev (or Vercel health)
+const keepPort = Number(process.env.PORT || 3000);
+http.createServer((_, res) => { res.writeHead(200, { "Content-Type": "text/plain" }); res.end("mediamover worker ok"); }).listen(keepPort, () => console.log(`[keepalive] http :${keepPort} for UptimeRobot`));
 // Optional Sentry for worker — enabled if SENTRY_DSN set
 try {
   const dsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
@@ -175,11 +180,15 @@ const parseWorker = new Worker(
       if (needsYtdlp) {
         try {
           const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
+          // Bypass YouTube bot check on datacenter IPs (Replit/Render): use android client + optional cookies
+          const cookiesPath = process.env.YTDLP_COOKIES || (fs.existsSync(path.join(process.cwd(), "cookies.txt")) ? path.join(process.cwd(), "cookies.txt") : undefined);
           const info: any = await ytdlp(url, {
             dumpSingleJson: true,
             noPlaylist: true,
             noWarnings: true,
             preferFreeFormats: true,
+            extractorArgs: "youtube:player_client=android",
+            ...(cookiesPath ? { cookies: cookiesPath } : {}),
           } as any);
           const formats = pickAllFormats(info, 8);
           if (formats.length) {
