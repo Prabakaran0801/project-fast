@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { processSingleJob } from "@/lib/processJob";
+
+export const maxDuration = 60;
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -21,8 +24,28 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   try {
-    const job = await prisma.downloadJob.findUnique({ where: { id } });
+    let job = await prisma.downloadJob.findUnique({ where: { id } });
     if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    // Hobby fix: Vercel Hobby only allows 1 cron/day, so process inline on poll
+    // Frontend polls every 2s — this makes QUEUED -> COMPLETED without cron
+    if (job.status === "QUEUED") {
+      try {
+        // Guard against thundering herd: try to claim job via status PARSING
+        const claimed = await prisma.downloadJob.updateMany({ where: { id, status: "QUEUED" }, data: { status: "PARSING", progress: 10 } });
+        if (claimed.count > 0) {
+          await processSingleJob(id, job.sourceUrl);
+          job = (await prisma.downloadJob.findUnique({ where: { id } })) || job;
+        } else {
+          // Another request is already processing — return PARSING so frontend keeps polling
+          job.status = "PARSING" as any;
+          job.progress = 10;
+          return NextResponse.json(job);
+        }
+      } catch (e) {
+        console.warn(`[job] inline process failed for ${id}`, String(e).slice(0, 200));
+        // Fall through to return current job state
+      }
+    }
     // Auto-expire for testing (1 min) — if expiresAt passed, mark EXPIRED and delete R2 /merged file
     const isExpiredTime = job.expiresAt && new Date(job.expiresAt) < new Date();
     if (isExpiredTime && job.status !== "EXPIRED") {
