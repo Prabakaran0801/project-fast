@@ -281,6 +281,8 @@ const parseWorker = new Worker(
 
       const seen = new Set<string>();
       detected = detected.filter((d: any) => (seen.has(d.quality) ? false : (seen.add(d.quality), true)));
+      // fpo.xxx / wowxxx signed URLs 403/410 if direct — force R2 merge via worker (like local yt-dlp download)
+      if (/fpo\.xxx|wowxxx\.to/.test(url)) detected.forEach((d: any) => (d.needsMerge = true));
 
       // 30 min expiry
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
