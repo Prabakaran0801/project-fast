@@ -208,6 +208,48 @@ const parseWorker = new Worker(
         }
       }
 
+      // Free Piped fallback for YouTube datacenter IP (Replit/Render bot) — no cookies/proxy, like local
+      if (detected.length === 0 && /youtube\.com|youtu\.be/.test(url)) {
+        try {
+          const idMatch = url.match(/(?:v=|\.be\/)([a-zA-Z0-9_-]{11})/);
+          const vid = idMatch ? idMatch[1] : null;
+          if (vid) {
+            const pipedHosts = ["https://pipedapi.kavin.rocks", "https://pipedapi.adminforge.de"];
+            for (const host of pipedHosts) {
+              try {
+                const r = await fetch(`${host}/streams/${vid}`, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(8000) });
+                if (!r.ok) continue;
+                const pj: any = await r.json();
+                const streams: any[] = [...(pj.videoStreams || []), ...(pj.audioStreams || [])];
+                const mapped = streams
+                  .filter((s: any) => s.url)
+                  .map((s: any) => ({
+                    url: s.url,
+                    quality: s.quality || (s.height ? `${s.height}p` : "best"),
+                    height: s.height || parseInt(s.quality) || undefined,
+                    ext: (s.mimeType || "video/mp4").split("/")[1]?.split(";")[0] || "mp4",
+                    hasAudio: !!s.audioTrackName || s.mimeType?.includes("audio") || false,
+                    needsMerge: false,
+                    title: (pj.title || "").replace(/[^a-z0-9_\- ]/gi, "").replace(/\s+/g, "_").slice(0, 40) || "video",
+                    size: s.bitrate ? `${(s.bitrate / 8000 / 1024).toFixed(1)} MB` : undefined,
+                    thumbnail: pj.thumbnailUrl || "",
+                  }))
+                  .filter((v: any) => v.height)
+                  .sort((a: any, b: any) => b.height - a.height)
+                  .slice(0, 8);
+                if (mapped.length) {
+                  detected = mapped;
+                  console.log(`[parse] piped ${host} found ${mapped.length} for ${jobId} vid=${vid}`);
+                  break;
+                }
+              } catch {}
+            }
+          }
+        } catch (e) {
+          console.warn("[parse] piped fallback failed", String(e).slice(0, 180));
+        }
+      }
+
       if (detected.length === 0 && /youtube\.com|youtu\.be/.test(url)) {
         try {
           const ytdl = await import("@distube/ytdl-core").then((m: any) => m.default || m);
