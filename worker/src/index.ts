@@ -178,25 +178,33 @@ const parseWorker = new Worker(
 
       const needsYtdlp = detected.length === 0 || /youtube\.com|youtu\.be|tiktok\.com|instagram\.com|twitter\.com|x\.com|vimeo\.com|twitch\.tv/.test(url);
       if (needsYtdlp) {
-        try {
-          const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
-          // Bypass YouTube bot check on datacenter IPs (Replit/Render): use android client + optional cookies
-          const cookiesPath = process.env.YTDLP_COOKIES || (fs.existsSync(path.join(process.cwd(), "cookies.txt")) ? path.join(process.cwd(), "cookies.txt") : undefined);
-          const info: any = await ytdlp(url, {
-            dumpSingleJson: true,
-            noPlaylist: true,
-            noWarnings: true,
-            preferFreeFormats: true,
-            extractorArgs: "youtube:player_client=android",
-            ...(cookiesPath ? { cookies: cookiesPath } : {}),
-          } as any);
-          const formats = pickAllFormats(info, 8);
-          if (formats.length) {
-            detected = formats;
-            console.log(`[parse] yt-dlp found ${formats.length} formats for ${jobId} title="${(info.title || pageTitle).slice(0, 60)}" heights=${formats.map((f: any) => f.quality).join(",")}`);
+        // Try multiple clients — Replit datacenter IPs need fallback (android→web→ios) + cookies
+        const clients = ["android", "web", "ios", "tv"];
+        // eslint-disable-next-line no-labels
+        for (const client of clients) {
+          try {
+            const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
+            const cookiesPath = process.env.YTDLP_COOKIES || (fs.existsSync(path.join(process.cwd(), "cookies.txt")) ? path.join(process.cwd(), "cookies.txt") : undefined);
+            const args: any = {
+              dumpSingleJson: true,
+              noPlaylist: true,
+              noWarnings: true,
+              preferFreeFormats: true,
+              ...(cookiesPath ? { cookies: cookiesPath } : {}),
+            };
+            // android/ios need extractorArgs, web/tv work without but add for consistency
+            if (client !== "web") args.extractorArgs = `youtube:player_client=${client}`;
+            const info: any = await ytdlp(url, args);
+            const formats = pickAllFormats(info, 8);
+            if (formats.length) {
+              detected = formats;
+              console.log(`[parse] yt-dlp (${client}${cookiesPath ? "+cookies" : ""}) found ${formats.length} formats for ${jobId} title="${(info.title || pageTitle).slice(0, 60)}" heights=${formats.map((f: any) => f.quality).join(",")}`);
+              break;
+            }
+          } catch (e: any) {
+            console.warn(`[parse] yt-dlp (${client}) failed`, String(e?.message || e).slice(0, 180));
+            if (client === clients[clients.length - 1]) console.warn("[parse] yt-dlp-exec failed", String(e?.message || e).slice(0, 300));
           }
-        } catch (e: any) {
-          console.warn("[parse] yt-dlp-exec failed", String(e?.message || e).slice(0, 300));
         }
       }
 
