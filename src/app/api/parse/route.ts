@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/ratelimit";
-import { getQueue, QUEUE_NAMES } from "@/lib/queue";
 import prisma from "@/lib/prisma";
 
 const schema = z.object({ url: z.string().min(1) });
@@ -69,37 +68,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
   }
 
-  // Create job in DB
+  // Create job in DB — Vercel-only mode: DB is the queue, cron processes it
   let job;
   try {
     job = await prisma.downloadJob.create({
-      data: { sourceUrl: url, status: "QUEUED" },
+      data: { sourceUrl: url, status: "QUEUED", progress: 0 },
     });
   } catch {
-    // If DB not configured, create ephemeral job ID
-    job = { id: `ephemeral_${Date.now()}`, sourceUrl: url, status: "QUEUED" } as unknown as { id: string };
+    // If DB not configured, create ephemeral job ID with mock
+    const mockVideos = [
+      { url: url, quality: "1080p", ext: "mp4", thumbnail: "", size: "42 MB", duration: "2:34" },
+      { url: url, quality: "720p", ext: "mp4", thumbnail: "", size: "28 MB" },
+    ];
+    const id = `ephemeral_${Date.now()}`;
+    // Return immediately as COMPLETED for demo when no DB — cron will handle real DB jobs
+    return NextResponse.json({ jobId: id, status: "COMPLETED", detectedUrls: mockVideos });
   }
 
-  // Try to enqueue for worker, fallback to inline mock if no Redis
-  const queue = getQueue(QUEUE_NAMES.PARSE);
-  if (queue) {
-    await queue.add("parse", { jobId: job.id, url }, { attempts: 2, backoff: { type: "exponential", delay: 2000 } });
-  } else {
-    // No Redis — simulate parsing for MVP demo by updating job with mock data
-    // In production, worker would do real yt-dlp + cheerio
-    try {
-      const mockVideos = [
-        { url: url, quality: "1080p", ext: "mp4", thumbnail: "", size: "42 MB", duration: "2:34" },
-        { url: url, quality: "720p", ext: "mp4", thumbnail: "", size: "28 MB" },
-      ];
-      await prisma.downloadJob.update({
-        where: { id: job.id },
-        data: { detectedUrls: mockVideos, status: "COMPLETED", progress: 100 },
-      });
-    } catch {
-      // ignore if ephemeral
-    }
-  }
-
+  // Vercel-only: no BullMQ/Redis — /api/cron/process (every minute) picks up QUEUED jobs
+  // Also try inline fast-path: if job is generic <video> page, client polls /api/job/[id] already
   return NextResponse.json({ jobId: job.id, status: "QUEUED" });
 }

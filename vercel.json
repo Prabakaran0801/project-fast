@@ -6,10 +6,19 @@
   "regions": ["iad1"],
   "crons": [
     {
+      "path": "/api/cron/process",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cleanup",
       "schedule": "0 3 * * *"
     }
   ],
+  "functions": {
+    "src/app/api/cron/process/route.ts": { "maxDuration": 60 },
+    "src/app/api/parse/route.ts": { "maxDuration": 10 },
+    "src/app/api/download/route.ts": { "maxDuration": 10 }
+  },
   "headers": [
     {
       "source": "/(.*)",
