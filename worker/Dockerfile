@@ -2,7 +2,7 @@
 FROM node:20-slim AS base
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip ffmpeg ca-certificates curl \
-  && pip install --break-system-packages yt-dlp --no-cache-dir \
+  && pip install --break-system-packages -U yt-dlp --no-cache-dir \
   && yt-dlp --version \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 

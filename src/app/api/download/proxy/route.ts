@@ -14,6 +14,33 @@ export async function GET(req: NextRequest) {
     return new Response("HLS/manifest stream — not directly downloadable. Please re-parse and choose a lower quality (360p/720p muxed) which has audio. High-res 1080p requires ffmpeg merge (coming soon).", { status: 400 });
   }
 
+  // Twitter/X video.twimg.com needs server-side fetch with Referer (302 alone 403s)
+  const needsProxyStream = /video\.twimg\.com|twimg\.com|instagram\.com|fbcdn\.net/.test(url);
+  if (needsProxyStream) {
+    console.log(`[proxy] streaming with Referer -> ${url.slice(0, 80)}`);
+    try {
+      const upstream = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          Referer: url.includes("twimg.com") ? "https://x.com/" : "https://www.instagram.com/",
+          Accept: "*/*",
+        },
+        redirect: "follow",
+      });
+      if (!upstream.ok || !upstream.body) return new Response(`Upstream ${upstream.status}`, { status: 502 });
+      const headers = new Headers();
+      headers.set("Content-Type", upstream.headers.get("content-type") || "video/mp4");
+      const cl = upstream.headers.get("content-length");
+      if (cl) headers.set("Content-Length", cl);
+      headers.set("Cache-Control", "public, max-age=60, s-maxage=3600");
+      headers.set("Content-Disposition", `attachment; filename="video.mp4"`);
+      return new Response(upstream.body as any, { status: 200, headers });
+    } catch (e: any) {
+      console.warn("[proxy] stream failed", String(e).slice(0, 200));
+      return new Response("Proxy fetch failed", { status: 502 });
+    }
+  }
+
   // HYBRID: 302 redirect to origin (googlevideo) — Cloudflare Cache Rule caches it at edge, no R2 storage = free + fast
   // Previously streamed via fetch() which was slow; now 302 lets CDN handle it.
   const headers = new Headers();

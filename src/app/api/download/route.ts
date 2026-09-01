@@ -23,6 +23,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: "COMPLETED", fileUrl: formatUrl });
   }
 
+  // TikTok/X are muxed - skip merge (instagram needs merge for audio, keep it)
+  if (needsMerge && sourceUrl && /tiktok\.com|twitter\.com|x\.com/.test(sourceUrl)) {
+    try {
+      await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "COMPLETED", progress: 100, fileUrl: formatUrl, expiresAt: new Date(Date.now() + 30 * 60 * 1000) } });
+    } catch {}
+    console.log(`[download] skip merge for social ${jobId} -> direct`);
+    return NextResponse.json({ status: "COMPLETED", fileUrl: formatUrl });
+  }
   // needsMerge=true (video-only like YouTube 1080p) — enqueue to BullMQ download-queue for ffmpeg merge -> R2 (worker/src/index.ts:308)
   // This works on Render single container (worker + Next together) or standalone worker; falls back to direct if no REDIS_URL
   try {

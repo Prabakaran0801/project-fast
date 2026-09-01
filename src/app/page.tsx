@@ -263,6 +263,15 @@ export default function Home() {
                       onDownload={async (v) => {
                         if (!jobId) return;
                         if ((v as any)._failed) {
+                          const err = (v as any).error || "";
+                          if (err === "youtube_blocked") {
+                            setParseError("YouTube blocked (datacenter IP). Fix: Save Netscape cookies to cookies.txt in project root (or set YTDLP_COOKIES in .env) → restart npm run dev. Or use piped fallback (auto). Check terminal for [processJob] yt-dlp (android) failed reason. Try: 1) https://test-videos.co.uk/vids/sintel/trailer.mp4 2) Different YouTube video");
+                            return;
+                          }
+                          if (err === "blocked_or_unsupported") {
+                            setParseError("This site is blocking downloads (missav/pornhub 403 or yt-dlp unsupported). Free fix: yt-dlp will auto-update on next deploy (Docker -U). Retrying will not help until deploy. Try: 1) Direct mp4 link https://test-videos.co.uk/vids/sintel/trailer.mp4 2) YouTube link 3) For missav/pornhub, check Render logs for [parse] yt-dlp (generic) failed - we now mark FAILED correctly, not fake COMPLETED.");
+                            return;
+                          }
                           setParseError("No downloadable formats found for this video. Try: 1) Direct mp4 link https://test-videos.co.uk/vids/sintel/trailer.mp4 (always works) 2) Different YouTube video (Shorts/live may require cookies) 3) Check terminal for [processJob] yt-dlp … failed reason.");
                           return;
                         }
@@ -292,62 +301,125 @@ export default function Home() {
                           });
                           await res.json();
                           let tries = 0;
+                          // Live poll every 800ms (was 2500ms dummy) – shows real backend 25→35→70→85→100
                           const poll = setInterval(async () => {
                             tries++;
-                            const j = await fetch(`/api/job/${jobId}`).then(
-                              (r) => r.json(),
-                            );
-                            if (j.progress)
-                              setDownloading({
-                                quality: v.quality,
-                                progress: j.progress,
-                              });
+                            const j = await fetch(`/api/job/${jobId}`).then((r) => r.json());
+                            if (j.progress) setDownloading({ quality: v.quality, progress: j.progress });
                             const fileUrl = j.fileUrl;
-                            if (
-                              fileUrl &&
-                              j.status === "COMPLETED" &&
-                              fileUrl !== v.url
-                            ) {
+                            if (fileUrl && j.status === "COMPLETED" && fileUrl !== v.url) {
+                              clearInterval(poll);
+                              // Real download with progress for merged R2 file too
+                              try {
+                                const resp = await fetch(fileUrl);
+                                if (!resp.ok || !resp.body) throw new Error("fetch failed");
+                                const total = Number(resp.headers.get("content-length") || 0);
+                                const reader = resp.body.getReader();
+                                let received = 0;
+                                const chunks: Uint8Array[] = [];
+                                while (true) {
+                                  const { done, value } = await reader.read();
+                                  if (done) break;
+                                  if (value) {
+                                    chunks.push(value);
+                                    received += value.length;
+                                    if (total) {
+                                      const pct = Math.min(95, 85 + Math.round((received / total) * 10));
+                                      setDownloading({ quality: v.quality, progress: pct });
+                                    }
+                                  }
+                                }
+                                const blob = new Blob(chunks as any);
+                                const blobUrl = URL.createObjectURL(blob);
+                                const a = document.createElement("a");
+                                a.href = blobUrl;
+                                a.download = `${title}.mp4`;
+                                document.body.appendChild(a);
+                                a.click();
+                                a.remove();
+                                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+                              } catch {
+                                const a = document.createElement("a");
+                                a.href = fileUrl;
+                                a.download = "";
+                                a.target = "_blank";
+                                document.body.appendChild(a);
+                                a.click();
+                                a.remove();
+                              }
+                              setDownloading(null);
+                            }
+                            if (tries > 120 || j.status === "FAILED") {
                               clearInterval(poll);
                               setDownloading(null);
-                              const a = document.createElement("a");
-                              a.href = fileUrl;
-                              a.download = "";
-                              a.target = "_blank";
-                              document.body.appendChild(a);
-                              a.click();
-                              a.remove();
                             }
-                            if (tries > 50 || j.status === "FAILED") {
-                              clearInterval(poll);
-                              setDownloading(null);
-                            }
-                          }, 2500);
+                          }, 800);
                           return;
                         }
-                        setDownloading({ quality: v.quality, progress: 50 });
-                        console.log(
-                          `[download] Hybrid 302 — direct muxed ${v.quality} -> ${v.url.slice(0, 80)} (Cloudflare Cache 1h, no R2)`,
-                        );
+                        // Direct muxed – YouTube/googlevideo must use anchor (CORS blocks fetch), proxy/twitter can use real fetch progress
+                        setDownloading({ quality: v.quality, progress: 5 });
+                        console.log(`[download] Direct muxed ${v.quality} -> ${v.url.slice(0, 80)}`);
                         await fetch("/api/download", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            jobId,
-                            formatUrl: v.url,
-                            height,
-                            sourceUrl,
-                            needsMerge: v.needsMerge,
-                          }),
+                          body: JSON.stringify({ jobId, formatUrl: v.url, height, sourceUrl, needsMerge: v.needsMerge }),
                         });
-                        // Hybrid: direct redirect to googlevideo via 302 (proxy now 302) — fast + free, no R2
-                        const directUrl = v.url;
-                        console.log(
-                          `[download] Triggering 302 download for ${v.quality}: ${directUrl.slice(0, 100)}`,
-                        );
-                        setTimeout(() => {
+                        const needsProxy = /video\.twimg\.com|twimg\.com|fbcdn\.net/.test(v.url);
+                        const directUrl = needsProxy ? `/api/download/proxy?url=${encodeURIComponent(v.url)}` : v.url;
+                        const isGoogleVideo = /googlevideo\.com/.test(v.url);
+                        // googlevideo has no CORS – use anchor 302 (instant), proxy has CORS via same-origin so real progress works
+                        if (isGoogleVideo && !needsProxy) {
+                          console.log(`[download] Triggering anchor for ${v.quality}: ${directUrl.slice(0, 100)}`);
+                          setDownloading({ quality: v.quality, progress: 50 });
+                          setTimeout(() => {
+                            setDownloading(null);
+                            const a = document.createElement("a");
+                            a.href = directUrl;
+                            a.target = "_blank";
+                            a.rel = "noopener";
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                            console.log(`[download] Started ${v.quality} download`);
+                          }, 300);
+                          return;
+                        }
+                        console.log(`[download] Fetching ${needsProxy ? "proxy stream" : "direct"} ${v.quality}: ${directUrl.slice(0, 100)}`);
+                        try {
+                          const resp = await fetch(directUrl);
+                          if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
+                          const total = Number(resp.headers.get("content-length") || 0);
+                          const reader = resp.body.getReader();
+                          let received = 0;
+                          const chunks: Uint8Array[] = [];
+                          while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            if (value) {
+                              chunks.push(value);
+                              received += value.length;
+                              if (total) {
+                                const pct = Math.min(96, Math.round((received / total) * 100));
+                                setDownloading({ quality: v.quality, progress: pct });
+                              } else {
+                                setDownloading({ quality: v.quality, progress: Math.min(85, 5 + Math.floor(received / 50000)) });
+                              }
+                            }
+                          }
+                          const blob = new Blob(chunks as any, { type: resp.headers.get("content-type") || "video/mp4" });
+                          const blobUrl = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = blobUrl;
+                          a.download = `${title}.mp4`;
+                          document.body.appendChild(a);
+                          a.click();
+                          a.remove();
+                          setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
                           setDownloading(null);
-                          // Use direct URL for fastest path (Cloudflare caches googlevideo); proxy 302 also works: `/api/download/proxy?url=...`
+                          console.log(`[download] Done ${v.quality} ${received} bytes`);
+                        } catch (e) {
+                          console.warn("[download] fetch progress failed, fallback to anchor", e);
+                          setDownloading(null);
                           const a = document.createElement("a");
                           a.href = directUrl;
                           a.target = "_blank";
@@ -355,10 +427,7 @@ export default function Home() {
                           document.body.appendChild(a);
                           a.click();
                           a.remove();
-                          console.log(
-                            `[download] Started ${v.quality} download`,
-                          );
-                        }, 300);
+                        }
                       }}
                     />
                     <div className="w-full">

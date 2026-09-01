@@ -44,14 +44,27 @@ export function VideoGrid({
           <Card className="overflow-hidden border-zinc-800 bg-[#121214] rounded-2xl shadow-sm hover:border-zinc-700 transition-colors duration-150 group">
             <div className="aspect-video bg-zinc-900 relative overflow-hidden flex items-center justify-center border-b border-zinc-800">
               {v.thumbnail ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={v.thumbnail}
-                  alt=""
-                  loading="lazy"
-                  className="w-full h-full object-cover group-hover:scale-[1.015] will-change-transform"
-                  style={{ transition: "transform 150ms ease-out" }}
-                />
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={v.thumbnail.includes("fbcdn.net") ? `/api/image/proxy?url=${encodeURIComponent(v.thumbnail)}` : v.thumbnail}
+                    alt=""
+                    loading="lazy"
+                    onError={(e) => {
+                      const img = e.currentTarget as HTMLImageElement;
+                      img.style.display = "none";
+                      const fallback = img.nextElementSibling as HTMLElement | null;
+                      if (fallback) fallback.classList.remove("hidden");
+                      fallback?.classList.add("flex");
+                    }}
+                    className="w-full h-full object-cover group-hover:scale-[1.015] will-change-transform"
+                    style={{ transition: "transform 150ms ease-out" }}
+                  />
+                  <div className="hidden absolute inset-0 flex-col items-center justify-center gap-2 text-zinc-600 bg-zinc-900">
+                    <Film className="h-9 w-9" aria-hidden />
+                    <span className="text-[11px] font-mono tracking-[0.14em]">NO PREVIEW</span>
+                  </div>
+                </>
               ) : (
                 <div className="flex flex-col items-center gap-2 text-zinc-600">
                   <Film className="h-9 w-9" aria-hidden />
