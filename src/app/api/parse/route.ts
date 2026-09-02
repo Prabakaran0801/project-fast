@@ -86,15 +86,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `DB not configured: ${msg.slice(0, 200)}`, hint: "Set DATABASE_URL on Vercel" }, { status: 503 });
   }
 
-  // Hybrid: if REDIS_URL + external worker running (local), enqueue — else use Vercel after() worker (single platform)
-  try {
-    const queue = getQueue(QUEUE_NAMES.PARSE);
-    if (queue) {
-      await queue.add("parse", { jobId: job.id, url }, { attempts: 2, backoff: { type: "exponential", delay: 2000 } });
-      console.log(`[parse] enqueued ${job.id} to external worker`);
-      return NextResponse.json({ jobId: job.id, status: "QUEUED" });
-    }
-  } catch (e) { console.warn("[parse] queue failed, using after()", String(e).slice(0,120)); }
+  // Single Vercel deploy: prefer DB queue (after + GET /api/job polling) — don't enqueue to external worker on Vercel
+  // Local dev with `npm run worker` still uses Redis when VERCEL is not set
+  const isVercel = !!process.env.VERCEL;
+  if (!isVercel) {
+    try {
+      const queue = getQueue(QUEUE_NAMES.PARSE);
+      if (queue) {
+        await queue.add("parse", { jobId: job.id, url }, { attempts: 2, backoff: { type: "exponential", delay: 2000 } });
+        console.log(`[parse] enqueued ${job.id} to external worker (local)`);
+        return NextResponse.json({ jobId: job.id, status: "QUEUED" });
+      }
+    } catch (e) { console.warn("[parse] queue failed, using after()", String(e).slice(0,120)); }
+  } else {
+    console.log(`[parse] Vercel single deploy — skip Redis enqueue, using DB queue for ${job.id}`);
+  }
 
   // Vercel-only after() — direct call avoids self-fetch loop in dev, same as worker file
   try {
