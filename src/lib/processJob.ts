@@ -4,7 +4,13 @@ import { routeHandlers, isYoutube } from "@/lib/handlers";
 import { youtubeThumbnail } from "@/lib/handlers/utils/thumbnail";
 
 export async function processSingleJob(jobId: string, url: string) {
-  await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "PARSING", progress: 10 } });
+  console.log(`[processJob] start ${jobId} ${url.slice(0, 80)} platform=${process.platform}`);
+  try {
+    await prisma.downloadJob.update({ where: { id: jobId }, data: { status: "PARSING", progress: 10 } });
+  } catch (e: any) {
+    console.error(`[processJob] DB update PARSING failed for ${jobId}: ${String(e?.message || e).slice(0, 300)}`);
+    throw e;
+  }
   if (isDirectVideoUrl(url)) {
     const detectedDirect = handleDirect(url);
     const exp = new Date(Date.now() + 30 * 60 * 1000);

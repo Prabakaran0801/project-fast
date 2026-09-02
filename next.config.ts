@@ -5,6 +5,10 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   compress: true,
   productionBrowserSourceMaps: false,
+  // Ensure yt-dlp binary is included in Vercel lambda (single deploy)
+  outputFileTracingIncludes: {
+    "/api/**/*": ["./node_modules/yt-dlp-exec/**/*", "./node_modules/@ffmpeg-installer/**/*"],
+  },
   async headers() {
     return [
       {

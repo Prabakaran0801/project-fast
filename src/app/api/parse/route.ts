@@ -79,15 +79,11 @@ export async function POST(req: NextRequest) {
     job = await prisma.downloadJob.create({
       data: { sourceUrl: url, status: "QUEUED", progress: 0 },
     });
-  } catch {
-    // If DB not configured, create ephemeral job ID with mock
-    const mockVideos = [
-      { url: url, quality: "1080p", ext: "mp4", thumbnail: "", size: "42 MB", duration: "2:34" },
-      { url: url, quality: "720p", ext: "mp4", thumbnail: "", size: "28 MB" },
-    ];
-    const id = `ephemeral_${Date.now()}`;
-    // Return immediately as COMPLETED for demo when no DB — cron will handle real DB jobs
-    return NextResponse.json({ jobId: id, status: "COMPLETED", detectedUrls: mockVideos });
+  } catch (e: any) {
+    const msg = String(e?.message || e).slice(0, 400);
+    console.error(`[parse] DB create failed: ${msg}`);
+    // Return 503 so prod failure is visible (not silent mock)
+    return NextResponse.json({ error: `DB not configured: ${msg.slice(0, 200)}`, hint: "Set DATABASE_URL on Vercel" }, { status: 503 });
   }
 
   // Hybrid: if REDIS_URL + external worker running (local), enqueue — else use Vercel after() worker (single platform)
