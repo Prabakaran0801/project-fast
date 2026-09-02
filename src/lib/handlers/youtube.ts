@@ -1,7 +1,7 @@
 import { pickAllFormats } from "./utils/pickAllFormats";
 import { getCookiesPath } from "./utils/cookies";
 import { getYtDlpProxyArgs, getProxyUrl, getFetchDispatcher } from "./utils/proxy";
-import { ensureYtDlpPath } from "../ensureYtDlp";
+import { ensureYtDlpPath, ensureYtDlpBinaryDownloaded } from "../ensureYtDlp";
 
 export async function youtubeHandler(url: string, jobId: string, existing: any[]): Promise<any[]> {
   ensureYtDlpPath();
@@ -28,7 +28,30 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
           }
           if (best.length >= 4) break;
         } catch (e: any) {
-          const full = String((e as any)?.stderr || (e as any)?.shortMessage || e?.message || e).slice(0, 600);
+          let full = String((e as any)?.stderr || (e as any)?.shortMessage || e?.message || e).slice(0, 600);
+          // If python missing, try downloading standalone yt-dlp_linux and retry once
+          if (full.includes("python3") || full.includes("No such file")) {
+            console.log(`[youtube] python missing, trying standalone download for ${jobId}`);
+            const dl = await ensureYtDlpBinaryDownloaded();
+            if (dl) {
+              try {
+                const ytdlp2: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
+                const args2: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...proxyArgs, ...(withCookies ? { cookies: cookiesPath! } : {}) };
+                if (useFree) (args2 as any).preferFreeFormats = true;
+                if (client !== "web") args2.extractorArgs = `youtube:player_client=${client}`;
+                const info2: any = await ytdlp2(url, args2);
+                const fmts2 = pickAllFormats(info2, 8);
+                if (fmts2.length) {
+                  console.log(`[youtube] (${client} retry-standalone) found ${fmts2.length} for ${jobId}`);
+                  if (fmts2.length > best.length) best = fmts2;
+                  if (best.length >= 4) break;
+                  continue;
+                }
+              } catch (e2: any) {
+                full = String((e2 as any)?.stderr || e2?.message || e2).slice(0, 600);
+              }
+            }
+          }
           console.warn(`[youtube] (${client}${withCookies ? " +cookies" : ""}${useFree ? " free" : ""}) failed`, full.slice(0, 350));
         }
       }

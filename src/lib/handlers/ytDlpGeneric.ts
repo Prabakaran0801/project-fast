@@ -1,5 +1,5 @@
 import { pickAllFormats } from "./utils/pickAllFormats";
-import { ensureYtDlpPath } from "../ensureYtDlp";
+import { ensureYtDlpPath, ensureYtDlpBinaryDownloaded } from "../ensureYtDlp";
 
 export async function ytDlpGeneric(url: string, jobId: string): Promise<any[] | null> {
   ensureYtDlpPath();

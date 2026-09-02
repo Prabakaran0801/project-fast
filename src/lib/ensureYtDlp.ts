@@ -55,10 +55,56 @@ export function ensureYtDlpPath(): string | undefined {
       } catch {}
     }
     console.warn(`[yt-dlp] binary not found in candidates: ${candidates.join(", ")}`);
-    // try direct download fallback - log for diagnostics
-    // Do not throw, let yt-dlp-exec try default
+    // Try to use python fallback if available (Vercel rarely has python3, but check)
+    try {
+      const { execSync } = require("child_process");
+      const py = (() => {
+        try { execSync("python3 --version", { stdio: "ignore" }); return "python3"; } catch {}
+        try { execSync("python --version", { stdio: "ignore" }); return "python"; } catch {}
+        return null;
+      })();
+      if (py) console.log(`[yt-dlp] python found: ${py}, will try yt-dlp script`);
+    } catch {}
   } catch (e) {
     console.warn(`[yt-dlp] ensure failed: ${String(e).slice(0, 200)}`);
   }
   return process.env.YOUTUBE_DL_PATH;
+}
+
+// Also try to download yt-dlp_linux at build time if missing (for Vercel)
+// This is called at runtime if binary still missing and tries to fetch standalone
+export async function ensureYtDlpBinaryDownloaded(): Promise<string | undefined> {
+  const existing = ensureYtDlpPath();
+  if (existing) return existing;
+  // Try to download yt-dlp_linux to /tmp (writable on Vercel)
+  const tmpPath = path.join("/tmp", "yt-dlp_linux");
+  try {
+    if (fs.existsSync(tmpPath)) {
+      try { fs.chmodSync(tmpPath, 0o755); } catch {}
+      process.env.YOUTUBE_DL_PATH = tmpPath;
+      console.log(`[yt-dlp] using cached /tmp binary at ${tmpPath}`);
+      return tmpPath;
+    }
+    console.log(`[yt-dlp] downloading standalone yt-dlp_linux to ${tmpPath}...`);
+    const url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux";
+    const res = await fetch(url, { redirect: "follow" });
+    if (!res.ok) throw new Error(`download failed ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(tmpPath, buf, { mode: 0o755 });
+    try { fs.chmodSync(tmpPath, 0o755); } catch {}
+    process.env.YOUTUBE_DL_PATH = tmpPath;
+    try {
+      const c: any = require("yt-dlp-exec/src/constants");
+      if (c) { c.YOUTUBE_DL_PATH = tmpPath; c.YOUTUBE_DL_DIR = "/tmp"; }
+    } catch {}
+    try {
+      delete require.cache[require.resolve("yt-dlp-exec/src/index.js")];
+      delete require.cache[require.resolve("yt-dlp-exec")];
+    } catch {}
+    console.log(`[yt-dlp] downloaded standalone binary ${buf.length} bytes to ${tmpPath}`);
+    return tmpPath;
+  } catch (e: any) {
+    console.warn(`[yt-dlp] download failed: ${String(e?.message || e).slice(0, 300)}`);
+    return undefined;
+  }
 }
