@@ -29,11 +29,13 @@ export async function GET() {
     }
   }
 
-  // yt-dlp binary check (avoid fs tracing whole project)
+  // yt-dlp binary check (ensure path before import)
   try {
+    const { ensureYtDlpPath } = await import("@/lib/ensureYtDlp");
+    const p = ensureYtDlpPath();
+    ytDlpPath = p || "node_modules/yt-dlp-exec/bin/yt-dlp";
     const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
-    ytDlp = `import-ok platform=${process.platform}`;
-    ytDlpPath = "node_modules/yt-dlp-exec/bin/yt-dlp";
+    ytDlp = `import-ok platform=${process.platform} path=${p || "default"}`;
   } catch (e: any) {
     ytDlp = `import-fail: ${String(e?.message || e).slice(0, 120)}`;
   }

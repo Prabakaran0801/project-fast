@@ -28,7 +28,8 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
           }
           if (best.length >= 4) break;
         } catch (e: any) {
-          console.warn(`[youtube] (${client}${withCookies ? " +cookies" : ""}${useFree ? " free" : ""}) failed`, String(e?.message || e).slice(0, 180));
+          const full = String((e as any)?.stderr || (e as any)?.shortMessage || e?.message || e).slice(0, 600);
+          console.warn(`[youtube] (${client}${withCookies ? " +cookies" : ""}${useFree ? " free" : ""}) failed`, full.slice(0, 350));
         }
       }
       if (best.length >= 4) break;
