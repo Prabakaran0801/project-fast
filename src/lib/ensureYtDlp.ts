@@ -16,14 +16,18 @@ export function ensureYtDlpPath(): string | undefined {
       console.log(`[yt-dlp] using env YOUTUBE_DL_PATH=${process.env.YOUTUBE_DL_PATH}`);
       return process.env.YOUTUBE_DL_PATH;
     }
-    // include /ROOT variant seen on Vercel (cwd /ROOT in logs)
+    // include /ROOT variant seen on Vercel (cwd /ROOT in logs) + standalone linux binary (no python needed)
     const candidates = [
+      path.join(process.cwd(), "node_modules/yt-dlp-exec/bin/yt-dlp_linux"),
       path.join(process.cwd(), "node_modules/yt-dlp-exec/bin/yt-dlp"),
       path.join(process.cwd(), "node_modules/yt-dlp-exec/bin/yt-dlp.exe"),
+      "/var/task/node_modules/yt-dlp-exec/bin/yt-dlp_linux",
       "/var/task/node_modules/yt-dlp-exec/bin/yt-dlp",
       "/var/task/node_modules/yt-dlp-exec/bin/yt-dlp.exe",
+      "/ROOT/node_modules/yt-dlp-exec/bin/yt-dlp_linux",
       "/ROOT/node_modules/yt-dlp-exec/bin/yt-dlp",
       "/ROOT/node_modules/yt-dlp-exec/bin/yt-dlp.exe",
+      path.join(__dirname, "../../node_modules/yt-dlp-exec/bin/yt-dlp_linux"),
       path.join(__dirname, "../../node_modules/yt-dlp-exec/bin/yt-dlp"),
       // fallback to constants path
       (() => { try { return require("yt-dlp-exec/src/constants").YOUTUBE_DL_PATH; } catch { return undefined; } })() as string,
