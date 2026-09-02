@@ -1,9 +1,11 @@
 import { pickAllFormats } from "./pickAllFormats";
 import { getYtDlpProxyArgs, getProxyUrl } from "./proxy";
+import { ensureYtDlpPath } from "../../ensureYtDlp";
 
 // Universal yt-dlp — no per-site logic, no instagram URL cleaning, no youtube client args
 // Used by universalHandler for X, TikTok, pornhub, missav, vimeo, etc.
 export async function ytDlpUniversal(url: string, jobId: string): Promise<any[] | null> {
+  ensureYtDlpPath();
   const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
   const proxyArgs = getYtDlpProxyArgs();
   const proxyUrl = getProxyUrl();

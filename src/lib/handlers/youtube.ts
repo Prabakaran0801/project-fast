@@ -1,8 +1,10 @@
 import { pickAllFormats } from "./utils/pickAllFormats";
 import { getCookiesPath } from "./utils/cookies";
 import { getYtDlpProxyArgs, getProxyUrl, getFetchDispatcher } from "./utils/proxy";
+import { ensureYtDlpPath } from "../ensureYtDlp";
 
 export async function youtubeHandler(url: string, jobId: string, existing: any[]): Promise<any[]> {
+  ensureYtDlpPath();
   let best: any[] = existing;
   const cookiesPath = getCookiesPath(jobId);
   const proxyArgs = getYtDlpProxyArgs();

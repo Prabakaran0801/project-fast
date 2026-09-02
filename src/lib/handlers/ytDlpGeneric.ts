@@ -1,6 +1,8 @@
 import { pickAllFormats } from "./utils/pickAllFormats";
+import { ensureYtDlpPath } from "../ensureYtDlp";
 
 export async function ytDlpGeneric(url: string, jobId: string): Promise<any[] | null> {
+  ensureYtDlpPath();
   const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
   // For instagram, try cleaned URL without tracking params (igsi etc) on retry
   const urlsToTry = [url];
