@@ -8,10 +8,6 @@
     {
       "path": "/api/cleanup",
       "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/process",
-      "schedule": "* * * * *"
     }
   ],
   "functions": {
