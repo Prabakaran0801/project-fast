@@ -8,14 +8,21 @@
     {
       "path": "/api/cleanup",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/process",
+      "schedule": "* * * * *"
     }
   ],
   "functions": {
     "src/app/api/cron/process/route.ts": { "maxDuration": 60 },
     "src/app/api/worker/process/route.ts": { "maxDuration": 60 },
     "src/app/api/job/[id]/route.ts": { "maxDuration": 60 },
-    "src/app/api/parse/route.ts": { "maxDuration": 10 },
-    "src/app/api/download/route.ts": { "maxDuration": 10 }
+    "src/app/api/parse/route.ts": { "maxDuration": 60 },
+    "src/app/api/parse/youtube/route.ts": { "maxDuration": 60 },
+    "src/app/api/parse/universal/route.ts": { "maxDuration": 60 },
+    "src/app/api/parse/social/route.ts": { "maxDuration": 60 },
+    "src/app/api/download/route.ts": { "maxDuration": 60 }
   },
   "headers": [
     {

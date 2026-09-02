@@ -1,9 +1,13 @@
 import { pickAllFormats } from "./utils/pickAllFormats";
 import { getCookiesPath } from "./utils/cookies";
+import { getYtDlpProxyArgs, getProxyUrl, getFetchDispatcher } from "./utils/proxy";
 
 export async function youtubeHandler(url: string, jobId: string, existing: any[]): Promise<any[]> {
   let best: any[] = existing;
   const cookiesPath = getCookiesPath(jobId);
+  const proxyArgs = getYtDlpProxyArgs();
+  const proxyUrl = getProxyUrl();
+  if (proxyUrl) console.log(`[youtube] proxy ${proxyUrl.replace(/:[^:/@]+@/, "://***@")} for ${jobId}`);
   const clients = ["web", "android", "ios", "tv"] as const;
   for (const withCookies of [false, true] as const) {
     if (withCookies && !cookiesPath) continue;
@@ -11,7 +15,7 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
       for (const useFree of [true, false] as const) {
         try {
           const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
-          const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...(withCookies ? { cookies: cookiesPath! } : {}) };
+          const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...proxyArgs, ...(withCookies ? { cookies: cookiesPath! } : {}) };
           if (useFree) (args as any).preferFreeFormats = true;
           if (client !== "web") args.extractorArgs = `youtube:player_client=${client}`;
           const info: any = await ytdlp(url, args);
@@ -36,9 +40,12 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
       const vid = idMatch ? idMatch[1] : null;
       if (vid) {
         const pipedHosts = ["https://pipedapi.kavin.rocks", "https://pipedapi.adminforge.de", "https://pipedapi.syncpundit.io"];
+        const pipedDispatcher = (() => { try { return getFetchDispatcher(); } catch { return undefined; } })();
         for (const host of pipedHosts) {
           try {
-            const r = await fetch(`${host}/streams/${vid}`, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(7000) });
+            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(7000) };
+            if (pipedDispatcher) pipedOpts.dispatcher = pipedDispatcher;
+            const r = await fetch(`${host}/streams/${vid}`, pipedOpts);
             if (!r.ok) continue;
             const pj: any = await r.json();
             const streams: any[] = [...(pj.videoStreams || []), ...(pj.audioStreams || [])];

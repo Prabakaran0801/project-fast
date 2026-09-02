@@ -5,6 +5,9 @@ import { checkRateLimit } from "@/lib/ratelimit";
 import prisma from "@/lib/prisma";
 import { getQueue, QUEUE_NAMES } from "@/lib/queue";
 
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+
 const schema = z.object({ url: z.string().min(1) });
 
 function extractUrl(raw: string): string | null {
