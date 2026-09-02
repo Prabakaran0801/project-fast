@@ -15,5 +15,15 @@ export function cheerioHeadersFor(url: string): Record<string, string> {
 }
 
 export function fetchHtml(url: string, timeoutMs = 15000) {
-  return fetch(url, { headers: cheerioHeadersFor(url), redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+  // proxy support: if YTDLP_PROXY / HTTPS_PROXY set, route fetch via ProxyAgent (for pornhub ISP block)
+  let dispatcher: any = undefined;
+  try {
+    // lazy to avoid circular init
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getFetchDispatcher } = require("./proxy");
+    dispatcher = getFetchDispatcher();
+  } catch {}
+  const opts: any = { headers: cheerioHeadersFor(url), redirect: "follow", signal: AbortSignal.timeout(timeoutMs) };
+  if (dispatcher) opts.dispatcher = dispatcher;
+  return fetch(url, opts);
 }

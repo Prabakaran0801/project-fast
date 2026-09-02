@@ -8,6 +8,25 @@ import path from "path";
 import os from "os";
 import http from "http";
 
+// Proxy support for ISP-blocked sites (pornhub.org in India) — YTDLP_PROXY / HTTPS_PROXY
+function getProxyUrl(): string | undefined {
+  const raw = process.env.YTDLP_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.https_proxy || process.env.http_proxy;
+  if (!raw?.trim()) return undefined;
+  try { new URL(raw.trim()); return raw.trim(); } catch { return undefined; }
+}
+function getProxyDispatcher(): any | undefined {
+  const proxyUrl = getProxyUrl();
+  if (!proxyUrl) return undefined;
+  try {
+    const { ProxyAgent } = require("undici");
+    return new ProxyAgent(proxyUrl);
+  } catch { return undefined; }
+}
+function getYtDlpProxyArgs(): Record<string, string> {
+  const p = getProxyUrl();
+  return p ? { proxy: p } : {};
+}
+
 // Keepalive http for standalone worker (Fly/Railway). On Render single container, Next.js owns PORT=3000 — worker uses 3001 or WORKER_PORT
 // Local dev: Next.js on :3000, worker on :3001 (avoid EADDRINUSE)
 const keepPort = Number(process.env.WORKER_PORT || 3001);
@@ -192,8 +211,13 @@ const parseWorker = new Worker(
         "Cache-Control": "no-cache",
         Pragma: "no-cache",
       };
+      const proxyUrl = getProxyUrl();
+      const proxyDispatcher = getProxyDispatcher();
+      if (proxyUrl) console.log(`[parse] proxy enabled for ${jobId} ${proxyUrl.replace(/:[^:/@]+@/, "://***@")}`);
       async function fetchHtml(target: string, timeoutMs: number) {
-        return fetch(target, { headers: cheerioHeaders, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+        const opts: any = { headers: cheerioHeaders, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) };
+        if (proxyDispatcher) opts.dispatcher = proxyDispatcher;
+        return fetch(target, opts);
       }
       for (let attempt = 0; attempt < 2 && detected.length === 0; attempt++) {
         try {
@@ -262,78 +286,114 @@ const parseWorker = new Worker(
       }
 
       const isYoutube = /youtube\.com|youtu\.be/.test(url);
-      const isGenericVideoSite = /youtube\.com|youtu\.be|tiktok\.com|instagram\.com|twitter\.com|x\.com|vimeo\.com|twitch\.tv|fpo\.xxx|wowxxx|pornhub|xvideos|xhamster|redtube|youjizz|missav/.test(url);
-      const needsYtdlp = detected.length === 0 || isGenericVideoSite;
-      if (needsYtdlp) {
-        // Generic attempt for fpo.xxx/wowxxx etc (no youtube player_client)
-        // For twitter/instagram/tiktok always prefer yt-dlp over cheerio (cheerio gives bare video.twimg.com 403 links)
-        const preferYtdlpOverCheerio = /twitter\.com|x\.com|instagram\.com|tiktok\.com/.test(url);
-        if (!isYoutube && (detected.length === 0 || preferYtdlpOverCheerio)) {
-          const urlsToTry = [url];
-          try {
-            const u = new URL(url);
-            if (u.hostname.includes("instagram.com")) {
-              u.search = "";
-              const clean = u.toString();
-              if (clean !== url) urlsToTry.push(clean);
-            }
-          } catch {}
-          let found: any[] | null = null;
-          for (const tryUrl of urlsToTry) {
+      const isInstagram = /instagram\.com/.test(url);
+      const isUniversal = !isYoutube && !isInstagram && !/\.(mp4|webm|mov)(\?|$)/i.test(url);
+
+      // FROZEN: YouTube — web first multi-client (keep exact logic)
+      if (isYoutube) {
+        let best: any[] = detected;
+        const clients = ["web", "android", "ios", "tv"];
+        for (const withCookies of [false, true] as const) {
+          const cookiesPath = process.env.YTDLP_COOKIES || (fs.existsSync(path.join(process.cwd(), "cookies.txt")) ? path.join(process.cwd(), "cookies.txt") : undefined);
+          if (withCookies && !cookiesPath) continue;
+          for (const client of clients) {
             for (const useFree of [true, false] as const) {
               try {
                 const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
-                const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true } as any;
+                const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...getYtDlpProxyArgs(), ...(cookiesPath ? { cookies: cookiesPath } : {}) };
                 if (useFree) (args as any).preferFreeFormats = true;
-                const info: any = await ytdlp(tryUrl, args);
+                if (client !== "web") args.extractorArgs = `youtube:player_client=${client}`;
+                const info: any = await ytdlp(url, args);
                 const formats = pickAllFormats(info, 8);
-                if (formats.length) {
-                  found = formats;
-                  console.log(`[parse] yt-dlp (generic) found ${formats.length} for ${jobId} ${tryUrl.slice(0,40)} ${useFree?"free":""} title="${(info.title || pageTitle).slice(0, 40)}" heights=${formats.map((f: any) => f.quality).join(",")}`);
-                  break;
+                if (formats.length > best.length) {
+                  best = formats;
+                  console.log(`[parse] yt-dlp (${client}${cookiesPath ? "+cookies" : ""}${useFree ? " free" : ""}) found ${formats.length} for ${jobId} title="${(info.title || pageTitle).slice(0, 60)}" heights=${formats.map((f: any) => f.quality).join(",")}`);
                 }
+                if (best.length >= 4) break;
               } catch (e: any) {
-                const msg = String(e?.message || e);
-                console.warn(`[parse] yt-dlp (generic) failed ${tryUrl.slice(0,40)} ${useFree?"free":""}`, msg.slice(0, 180));
-                if (msg.includes("429") || msg.includes("rate")) await new Promise((r) => setTimeout(r, 900));
+                console.warn(`[parse] yt-dlp (${client}${useFree ? " free" : ""}) failed`, String(e?.message || e).slice(0, 180));
               }
-            }
-            if (found) break;
-          }
-          if (found) detected = found;
-          else if (preferYtdlpOverCheerio) console.warn(`[parse] yt-dlp (generic) no formats for ${url.slice(0,60)}`);
-        }
-        // Youtube multi-client - web first (android only 360p for vpzXg1jI5bc), keep best across clients
-        if (isYoutube || detected.length === 0) {
-          let best: any[] = detected;
-          const clients = ["web", "android", "ios", "tv"];
-          for (const withCookies of [false, true] as const) {
-            const cookiesPath = process.env.YTDLP_COOKIES || (fs.existsSync(path.join(process.cwd(), "cookies.txt")) ? path.join(process.cwd(), "cookies.txt") : undefined);
-            if (withCookies && !cookiesPath) continue;
-            for (const client of clients) {
-              if (!isYoutube) break;
-              for (const useFree of [true, false] as const) {
-                try {
-                  const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
-                  const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...(cookiesPath ? { cookies: cookiesPath } : {}) };
-                  if (useFree) (args as any).preferFreeFormats = true;
-                  if (client !== "web") args.extractorArgs = `youtube:player_client=${client}`;
-                  const info: any = await ytdlp(url, args);
-                  const formats = pickAllFormats(info, 8);
-                  if (formats.length > best.length) {
-                    best = formats;
-                    console.log(`[parse] yt-dlp (${client}${cookiesPath ? "+cookies" : ""}${useFree?" free":""}) found ${formats.length} for ${jobId} title="${(info.title || pageTitle).slice(0, 60)}" heights=${formats.map((f: any) => f.quality).join(",")}`);
-                  }
-                  if (best.length >= 4) break;
-                } catch (e: any) {
-                  console.warn(`[parse] yt-dlp (${client}${useFree?" free":""}) failed`, String(e?.message || e).slice(0, 180));
-                }
-              }
-              if (best.length >= 4) break;
             }
             if (best.length >= 4) break;
           }
-          if (best.length) detected = best;
+          if (best.length >= 4) break;
+        }
+        if (best.length) detected = best;
+      } else if (isInstagram) {
+        // FROZEN: Instagram — generic with cleaned URL retry (preserve exact logic)
+        const urlsToTry = [url];
+        try {
+          const u = new URL(url);
+          if (u.hostname.includes("instagram.com")) {
+            u.search = "";
+            const clean = u.toString();
+            if (clean !== url) urlsToTry.push(clean);
+          }
+        } catch {}
+        let found: any[] | null = null;
+        for (const tryUrl of urlsToTry) {
+          for (const useFree of [true, false] as const) {
+            try {
+              const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
+              const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...getYtDlpProxyArgs() } as any;
+              if (useFree) (args as any).preferFreeFormats = true;
+              const info: any = await ytdlp(tryUrl, args);
+              const formats = pickAllFormats(info, 8);
+              if (formats.length) {
+                found = formats;
+                console.log(`[parse] yt-dlp (instagram) found ${formats.length} for ${jobId} ${tryUrl.slice(0, 40)} ${useFree ? "free" : ""} title="${(info.title || pageTitle).slice(0, 40)}" heights=${formats.map((f: any) => f.quality).join(",")}`);
+                break;
+              }
+            } catch (e: any) {
+              const msg = String(e?.message || e);
+              console.warn(`[parse] yt-dlp (instagram) failed ${tryUrl.slice(0, 40)} ${useFree ? "free" : ""}`, msg.slice(0, 180));
+              if (msg.includes("429") || msg.includes("rate")) await new Promise((r) => setTimeout(r, 900));
+            }
+          }
+          if (found) break;
+        }
+        if (found) detected = found;
+        else console.warn(`[parse] yt-dlp (instagram) no formats for ${url.slice(0, 60)} keeping cheerio=${detected.length}`);
+      } else if (isUniversal) {
+        // Universal — X, TikTok, pornhub, missav, fpo.xxx, wowxxx, vimeo, twitch, etc.
+        // Isolated: ytDlpUniversal (no per-site logic, no instagram clean, generic extractor)
+        const isWeak = detected.length === 0 || detected.every((d: any) => d.quality === "auto");
+        const shouldTryYtDlp = detected.length === 0 || isWeak || /twitter\.com|x\.com|tiktok\.com/.test(url);
+        if (shouldTryYtDlp) {
+          let found: any[] | null = null;
+          for (const useFree of [true, false] as const) {
+            try {
+              const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
+              const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...getYtDlpProxyArgs() } as any;
+              if (useFree) (args as any).preferFreeFormats = true;
+              const info: any = await ytdlp(url, args);
+              const formats = pickAllFormats(info, 8);
+              if (formats.length) {
+                found = formats;
+                console.log(`[parse] yt-dlp (universal) found ${formats.length} for ${jobId} ${url.slice(0, 40)} ${useFree ? "free" : ""} title="${(info.title || pageTitle).slice(0, 40)}" heights=${formats.map((f: any) => f.quality).join(",")}`);
+                break;
+              }
+            } catch (e: any) {
+              const full = String((e as any)?.stderr || (e as any)?.shortMessage || e?.message || e).slice(0, 600);
+              const msg = String(e?.message || e);
+              console.warn(`[parse] yt-dlp (universal) failed ${url.slice(0, 40)} ${useFree ? "free" : ""}`, full.slice(0, 320));
+              if (msg.includes("429") || msg.includes("rate") || msg.includes("Try again")) {
+                await new Promise((r) => setTimeout(r, 900));
+                try {
+                  const ytdlp2: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
+                  const info2: any = await ytdlp2(url, { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...getYtDlpProxyArgs() } as any);
+                  const fmts2 = pickAllFormats(info2, 8);
+                  if (fmts2.length) {
+                    found = fmts2;
+                    console.log(`[parse] yt-dlp (universal) retry found ${fmts2.length} for ${jobId}`);
+                    break;
+                  }
+                } catch {}
+              }
+            }
+          }
+          if (found) detected = found;
+          else if (detected.length === 0) console.warn(`[parse] yt-dlp (universal) no formats for ${url.slice(0, 60)}`);
         }
       }
 

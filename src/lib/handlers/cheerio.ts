@@ -1,12 +1,18 @@
 import * as cheerio from "cheerio";
 import { cheerioHeadersFor } from "./utils/fetchHtml";
+import { getFetchDispatcher, getProxyUrl } from "./utils/proxy";
 
 export async function cheerioCrawl(url: string, jobId: string): Promise<{ detected: any[]; pageTitle: string }> {
   let detected: any[] = [];
   let pageTitle = "";
   const headers = cheerioHeadersFor(url);
+  const proxyUrl = getProxyUrl();
+  const dispatcher = getFetchDispatcher();
   async function fetchHtml(target: string, timeoutMs: number) {
-    return fetch(target, { headers, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+    const opts: any = { headers, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) };
+    if (dispatcher) opts.dispatcher = dispatcher;
+    if (proxyUrl) console.log(`[cheerio] proxy enabled for ${jobId} ${proxyUrl.replace(/:[^:/@]+@/, "://***@")}`);
+    return fetch(target, opts);
   }
   for (let attempt = 0; attempt < 2 && detected.length === 0; attempt++) {
     try {
