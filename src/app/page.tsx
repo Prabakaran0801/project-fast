@@ -56,8 +56,9 @@ export default function Home() {
     setJobStatus("PARSING");
     setJobProgress(10);
     setExpiredVideo(null);
-    let completedSeen = false;
+    let pollCount = 0;
     const interval = setInterval(async () => {
+      pollCount++;
       try {
         const res = await fetch(`/api/job/${jobId}`);
         const data = await res.json();
@@ -65,7 +66,6 @@ export default function Home() {
         setJobProgress(data.progress ?? 0);
         if (data.detectedUrls) setVideos(data.detectedUrls as DetectedVideo[]);
         if (data.fileUrl && downloading) setDownloading(null);
-        if (data.status === "COMPLETED") completedSeen = true;
         if (data.status === "EXPIRED") {
           const title =
             (data.detectedUrls?.[0]?.title as string) ||
@@ -79,11 +79,38 @@ export default function Home() {
           );
           setExpiredVideo(title);
           clearInterval(interval);
+          return;
         }
-        if (data.status === "FAILED") clearInterval(interval);
-        // Keep polling after COMPLETED to detect 1 min expiry — stop after 3 min
-        if (completedSeen && data.status === "COMPLETED") {
-          // continue polling for expiry
+        if (data.status === "FAILED") {
+          clearInterval(interval);
+          return;
+        }
+        if (data.status === "COMPLETED") {
+          clearInterval(interval);
+          // Poll expiry separately at 30s interval, not 1.2s spam
+          const expiryPoll = setInterval(async () => {
+            try {
+              const r = await fetch(`/api/job/${jobId}`);
+              const d = await r.json();
+              if (d.status === "EXPIRED") {
+                const title =
+                  (d.detectedUrls?.[0]?.title as string) ||
+                  d.sourceUrl ||
+                  "Video";
+                setExpiredVideo(title);
+                setJobStatus("EXPIRED");
+                clearInterval(expiryPoll);
+              }
+            } catch {}
+          }, 30000);
+          // stop expiry poll after 35min
+          setTimeout(() => clearInterval(expiryPoll), 35 * 60 * 1000);
+          return;
+        }
+        // safety: stop after 90 polls (~108s) if still PARSING/QUEUED
+        if (pollCount > 90) {
+          clearInterval(interval);
+          console.warn(`[poll] stopped after 90 tries for ${jobId}`);
         }
       } catch {}
     }, 1200);
