@@ -14,25 +14,38 @@ export async function GET(req: NextRequest) {
     return new Response("HLS/manifest stream — not directly downloadable. Please re-parse and choose a lower quality (360p/720p muxed) which has audio. High-res 1080p requires ffmpeg merge (coming soon).", { status: 400 });
   }
 
+  // Client ffmpeg merge needs actual bytes, not 302 — force stream with ?stream=1
+  const forceStream = req.nextUrl.searchParams.get("stream") === "1" || req.headers.get("x-stream") === "1";
   // Twitter/X video.twimg.com needs server-side fetch with Referer (302 alone 403s)
-  const needsProxyStream = /video\.twimg\.com|twimg\.com|instagram\.com|fbcdn\.net/.test(url);
+  const needsProxyStream = forceStream || /video\.twimg\.com|twimg\.com|instagram\.com|fbcdn\.net/.test(url);
   if (needsProxyStream) {
-    console.log(`[proxy] streaming with Referer -> ${url.slice(0, 80)}`);
+    console.log(`[proxy] streaming with Referer -> ${url.slice(0, 80)} forceStream=${forceStream}`);
     try {
-      const upstream = await fetch(url, {
+      // Use same YTDLP_PROXY as yt-dlp so googlevideo ip= param matches proxy IP (otherwise 403)
+      let dispatcher: any = undefined;
+      try {
+        const { getFetchDispatcher } = await import("@/lib/handlers/utils/proxy");
+        dispatcher = getFetchDispatcher();
+        if (dispatcher) console.log(`[proxy] using YTDLP_PROXY dispatcher for ${url.slice(0, 40)}`);
+      } catch {}
+      const fetchOpts: any = {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          Referer: url.includes("twimg.com") ? "https://x.com/" : "https://www.instagram.com/",
+          Referer: url.includes("twimg.com") ? "https://x.com/" : url.includes("googlevideo.com") ? "https://www.youtube.com/" : "https://www.instagram.com/",
           Accept: "*/*",
         },
-        redirect: "follow",
-      });
+        redirect: "follow" as const,
+      };
+      if (dispatcher) fetchOpts.dispatcher = dispatcher;
+      const upstream = await fetch(url, fetchOpts);
       if (!upstream.ok || !upstream.body) return new Response(`Upstream ${upstream.status}`, { status: 502 });
       const headers = new Headers();
       headers.set("Content-Type", upstream.headers.get("content-type") || "video/mp4");
       const cl = upstream.headers.get("content-length");
       if (cl) headers.set("Content-Length", cl);
       headers.set("Cache-Control", "public, max-age=60, s-maxage=3600");
+      headers.set("Access-Control-Allow-Origin", "*");
+      headers.set("Access-Control-Allow-Headers", "*");
       headers.set("Content-Disposition", `attachment; filename="video.mp4"`);
       return new Response(upstream.body as any, { status: 200, headers });
     } catch (e: any) {

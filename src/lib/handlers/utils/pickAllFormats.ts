@@ -34,6 +34,12 @@ export function pickAllFormats(info: any, max = 8) {
     (info.id && String(info.id).length === 11 ? [null, info.id] : null);
   const ytThumb = vidMatch ? `https://img.youtube.com/vi/${vidMatch[1]}/hqdefault.jpg` : "";
   const finalThumb = thumb || ytThumb;
+  // best audio for client-side merge (free, no R2) — pick highest bitrate audio
+  const audioCandidates = (info.formats || [])
+    .filter((f: any) => f.url && f.acodec !== "none" && f.vcodec === "none")
+    .sort((a: any, b: any) => (b.abr || b.bitrate || 0) - (a.abr || a.bitrate || 0));
+  const bestAudio = audioCandidates[0];
+  const bestAudioUrl = bestAudio?.url || undefined;
   return pool.map((f: any) => ({
     format_id: f.format_id,
     url: f.url,
@@ -44,6 +50,7 @@ export function pickAllFormats(info: any, max = 8) {
     vcodec: f.vcodec,
     hasAudio: f.acodec !== "none",
     needsMerge: f.acodec === "none",
+    audioUrl: f.acodec === "none" ? bestAudioUrl : undefined,
     title,
     size: f.filesize
       ? `${(f.filesize / 1024 / 1024).toFixed(1)} MB`
@@ -81,6 +88,10 @@ export function pickAllFormatsWorker(info: any, max = 8) {
     .slice(0, max);
   const pool = sorted.length ? sorted : formats.filter((f) => f.url && !isHls(f) && !isStoryboard(f)).slice(0, max);
   const title = (info.title || "").replace(/[^a-z0-9_\- ]/gi, "").replace(/\s+/g, "_").slice(0, 40) || "video";
+  const audioCandidatesW = (info.formats || [])
+    .filter((f: any) => f.url && f.acodec !== "none" && f.vcodec === "none")
+    .sort((a: any, b: any) => (b.abr || b.bitrate || 0) - (a.abr || a.bitrate || 0));
+  const bestAudioW = audioCandidatesW[0]?.url;
   return pool.map((f: any) => ({
     format_id: f.format_id,
     url: f.url,
@@ -91,6 +102,7 @@ export function pickAllFormatsWorker(info: any, max = 8) {
     vcodec: f.vcodec,
     hasAudio: f.acodec !== "none",
     needsMerge: f.acodec === "none",
+    audioUrl: f.acodec === "none" ? bestAudioW : undefined,
     title,
     size: f.filesize ? `${(f.filesize / 1024 / 1024).toFixed(1)} MB` : f.filesize_approx ? `~${(f.filesize_approx / 1024 / 1024).toFixed(1)} MB` : undefined,
     thumbnail: info.thumbnail || info.thumbnails?.[0]?.url || "",

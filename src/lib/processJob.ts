@@ -17,8 +17,21 @@ export async function processSingleJob(jobId: string, url: string) {
     await prisma.downloadJob.update({ where: { id: jobId }, data: { detectedUrls: detectedDirect as any, status: "COMPLETED", progress: 100, expiresAt: exp } });
     return detectedDirect;
   }
-  // delegate to per-site handlers (cheerio | ytDlpGeneric | youtube) – same logic website → same handler
-  const { detected: routed, pageTitle } = await routeHandlers(url, jobId);
+  // delegate to per-site handlers with 30s overall timeout so PARSING doesn't hang 90 polls (youtube 2h8vP4U7OZ4 took 70s)
+  let routed: any[] = [];
+  let pageTitle = "";
+  try {
+    const res: any = await Promise.race([
+      routeHandlers(url, jobId),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("routeHandlers timeout 30s")), 30000)),
+    ]);
+    routed = res.detected;
+    pageTitle = res.pageTitle;
+  } catch (e: any) {
+    console.warn(`[processJob] routeHandlers timeout/error for ${jobId}: ${String(e?.message || e).slice(0, 200)}`);
+    routed = [];
+    pageTitle = "";
+  }
   let detected: any[] = routed;
 
   const youtube = isYoutube(url);

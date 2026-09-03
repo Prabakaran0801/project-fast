@@ -29,7 +29,7 @@ export function ensureYtDlpPath(): string | undefined {
       path.join(__dirname, "../../node_modules/yt-dlp-exec/bin"),
     ];
     const candidates: string[] = [];
-    for (const base of bases) for (const name of orderedNames) candidates.push(path.join(base, name));
+    for (const base of bases) for (const name of orderedNames) candidates.push(path.join(/* turbopackIgnore: true */ base, name));
     candidates.push((() => { try { return require("yt-dlp-exec/src/constants").YOUTUBE_DL_PATH; } catch { return undefined; } })() as string);
     const finalCandidates = candidates.filter(Boolean) as string[];
 

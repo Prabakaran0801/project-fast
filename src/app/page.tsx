@@ -7,6 +7,7 @@ import { VideoGrid, DetectedVideo } from "@/components/VideoGrid";
 import { TransferDropzone } from "@/components/TransferDropzone";
 import { pushJob } from "@/lib/offline-history";
 import { InstallPrompt } from "@/components/InstallPrompt";
+import { ProcessLog, LogEntry } from "@/components/ProcessLog";
 
 export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
@@ -17,23 +18,36 @@ export default function Home() {
   const [downloading, setDownloading] = useState<{
     quality: string;
     progress: number;
+    msg?: string;
   } | null>(null);
   const [expiredVideo, setExpiredVideo] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+
+  function addLog(route: string, msg: string, level: LogEntry["level"] = "info") {
+    const now = new Date();
+    const time = now.toLocaleTimeString("en-GB", { hour12: false }) + `.${String(now.getMilliseconds()).padStart(3, "0")}`;
+    setLogs((prev) => [...prev.slice(-199), { time, route, msg, level }]);
+  }
 
   // Global cleanup on reload — deletes all expired /merged files from R2 (console logged server side)
   useEffect(() => {
+    addLog("POST /api/cleanup", "Checking R2 for expired /merged files...", "info");
     fetch("/api/cleanup", { method: "POST" })
       .then((r) => r.json())
       .then((d) => {
-        if (d.deleted > 0)
-          console.log(
-            `[cleanup] deleted ${d.deleted} expired R2 files on reload`,
-            d,
-          );
-        else console.log("[cleanup] no expired files on reload", d);
+        if (d.deleted > 0) {
+          addLog("POST /api/cleanup", `Deleted ${d.deleted} expired R2 objects ✓`, "ok");
+          console.log(`[cleanup] deleted ${d.deleted} expired R2 files on reload`, d);
+        } else {
+          addLog("POST /api/cleanup", "No expired R2 objects", "info");
+          console.log("[cleanup] no expired files on reload", d);
+        }
       })
-      .catch((e) => console.warn("[cleanup] failed", e));
+      .catch((e) => {
+        addLog("POST /api/cleanup", `Failed: ${String(e).slice(0, 80)}`, "error");
+        console.warn("[cleanup] failed", e);
+      });
   }, []);
 
   // Offline cache: persist completed jobs for history PWA
@@ -56,6 +70,8 @@ export default function Home() {
     setJobStatus("PARSING");
     setJobProgress(10);
     setExpiredVideo(null);
+    addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `Polling job ${jobId} — status check every 1.2s`, "info");
+    addLog("DB queue", "Job QUEUED → PARSING via processSingleJob (routeHandlers: youtube/instagram/universal)", "info");
     let pollCount = 0;
     const interval = setInterval(async () => {
       pollCount++;
@@ -64,13 +80,33 @@ export default function Home() {
         const data = await res.json();
         setJobStatus(data.status);
         setJobProgress(data.progress ?? 0);
-        if (data.detectedUrls) setVideos(data.detectedUrls as DetectedVideo[]);
+        if (data.detectedUrls) {
+          const wasEmpty = videos.length === 0 && data.detectedUrls.length > 0;
+          setVideos(data.detectedUrls as DetectedVideo[]);
+          if (wasEmpty) {
+            const first: any = data.detectedUrls[0];
+            if (first?._failed) {
+              addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `No formats: ${first.error || "blocked"} — will show FAILED`, "warn");
+            } else {
+              addLog(
+                `GET /api/job/${jobId.slice(0, 8)}…`,
+                `Found ${data.detectedUrls.length} formats via ${data.detectedUrls[0]?.quality || "?"} — pickAllFormats → VideoGrid`,
+                "ok",
+              );
+            }
+          }
+        }
         if (data.fileUrl && downloading) setDownloading(null);
+        addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `#${pollCount} status=${data.status} progress=${data.progress ?? 0}%`, data.status === "FAILED" ? "warn" : data.status === "COMPLETED" ? "ok" : "info");
+        if (data.fileUrl && data.status === "COMPLETED" && data.fileUrl.includes("/merged/")) {
+          addLog("R2 /merged", `Merged file pushed to R2: ${data.fileUrl.slice(0, 70)}…`, "ok");
+        }
         if (data.status === "EXPIRED") {
           const title =
             (data.detectedUrls?.[0]?.title as string) ||
             data.sourceUrl ||
             "Video";
+          addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `EXPIRED: "${title}" deleted from R2`, "warn");
           console.log(
             `[expired] Job ${jobId} expired — video: "${title}" at ${new Date().toISOString()}`,
           );
@@ -82,12 +118,16 @@ export default function Home() {
           return;
         }
         if (data.status === "FAILED") {
+          const err = (data.detectedUrls?.[0] as any)?.error || "blocked_or_unsupported";
+          addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `FAILED: ${err} — check yt-dlp / proxy / cookies`, "error");
           clearInterval(interval);
           return;
         }
         if (data.status === "COMPLETED") {
+          addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `COMPLETED — rendering VideoGrid`, "ok");
           clearInterval(interval);
           // Poll expiry separately at 30s interval, not 1.2s spam
+          addLog("R2", "Watching R2 expiry (30s poll, 35min window)", "info");
           const expiryPoll = setInterval(async () => {
             try {
               const r = await fetch(`/api/job/${jobId}`);
@@ -97,6 +137,7 @@ export default function Home() {
                   (d.detectedUrls?.[0]?.title as string) ||
                   d.sourceUrl ||
                   "Video";
+                addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `EXPIRED detected: "${title}"`, "warn");
                 setExpiredVideo(title);
                 setJobStatus("EXPIRED");
                 clearInterval(expiryPoll);
@@ -109,30 +150,40 @@ export default function Home() {
         }
         // safety: stop after 90 polls (~108s) if still PARSING/QUEUED
         if (pollCount > 90) {
+          addLog(`GET /api/job/${jobId.slice(0, 8)}…`, "Stopped after 90 polls — still PARSING", "warn");
           clearInterval(interval);
           console.warn(`[poll] stopped after 90 tries for ${jobId}`);
         }
-      } catch {}
+      } catch (e) {
+        addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `Poll error: ${String(e).slice(0, 60)}`, "error");
+      }
     }, 1200);
+    addLog(`GET /api/job/${jobId.slice(0, 8)}…`, "Initial fetch for immediate status", "info");
     fetch(`/api/job/${jobId}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.detectedUrls) setVideos(data.detectedUrls);
         setJobStatus(data.status);
         setJobProgress(data.progress ?? 0);
+        addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `Initial: status=${data.status} progress=${data.progress ?? 0}%`, data.status === "FAILED" ? "error" : "info");
         if (data.status === "EXPIRED") {
           const title =
             (data.detectedUrls?.[0]?.title as string) ||
             data.sourceUrl ||
             "Video";
+          addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `EXPIRED on initial fetch: "${title}"`, "warn");
           console.log(
             `[expired] Job ${jobId} expired on initial fetch — video: "${title}"`,
           );
           setExpiredVideo(title);
         }
-      });
+      })
+      .catch((e) => addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `Initial fetch failed: ${String(e).slice(0, 60)}`, "error"));
     // Safety: clear after 4 min to avoid infinite poll
-    const timeout = setTimeout(() => clearInterval(interval), 4 * 60 * 1000);
+    const timeout = setTimeout(() => {
+      addLog(`GET /api/job/${jobId.slice(0, 8)}…`, "Safety timeout 4min — clearing poll", "warn");
+      clearInterval(interval);
+    }, 4 * 60 * 1000);
     return () => {
       clearInterval(interval);
       clearTimeout(timeout);
@@ -193,10 +244,12 @@ export default function Home() {
                   <div className="mt-6 w-full flex flex-col items-center">
                     <div className="w-full">
                       <LinkInput
-                        onDetect={(id) => {
+                        onDetect={(id, url) => {
                           setJobId(id);
                           setVideos([]);
                           setParseError(null);
+                          addLog("POST /api/parse", `Detect clicked → ${url.slice(0, 70)}… → job ${id.slice(0, 8)}… QUEUED`, "info");
+                          addLog("POST /api/parse", "Route: extractUrl → prisma.create → DB queue (local=prod single deploy)", "info");
                         }}
                       />
                     </div>
@@ -272,25 +325,57 @@ export default function Home() {
                               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shimmer_1.2s_infinite]" />
                             </motion.div>
                           </div>
-                          <p className="text-[11px] font-mono text-zinc-500 mt-1 text-center">
-                            {downloading.progress < 30
-                              ? "Downloading video..."
-                              : downloading.progress < 60
-                                ? "Downloading audio + merging with ffmpeg..."
-                                : downloading.progress < 85
-                                  ? "Finalizing merge..."
-                                  : "Uploading to R2 (fast CDN)..."}
+                          <div className="flex items-center justify-between mt-2">
+                            <p className="text-[11px] font-mono text-zinc-500">
+                              {downloading.msg
+                                ? downloading.msg
+                                : downloading.progress < 30
+                                  ? "Downloading video..."
+                                  : downloading.progress < 60
+                                    ? "Downloading audio + merging with ffmpeg..."
+                                    : downloading.progress < 85
+                                      ? "Finalizing merge..."
+                                      : "Uploading to R2 (fast CDN)..."}
+                            </p>
+                            <button
+                              onClick={() => {
+                                addLog("client ffmpeg", `Cancelled ${downloading.quality} merge by user`, "warn");
+                                setDownloading(null);
+                              }}
+                              className="h-7 px-3 rounded-full bg-zinc-800 border border-zinc-700 text-[11px] font-mono text-zinc-300 hover:text-white hover:bg-zinc-700"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          <p className="text-[10px] font-mono text-amber-400/80 mt-1 text-center">
+                            Blocked: finish or cancel to download other format
                           </p>
                         </motion.div>
                       )}
                     </AnimatePresence>
+                    <ProcessLog logs={logs} onClear={() => setLogs([])} />
                     <VideoGrid
                       videos={videos}
                       jobId={jobId}
                       onDownload={async (v) => {
+                        // hasAudio true → direct redirect (no ffmpeg, no block)
+                        if (!v.needsMerge) {
+                          addLog("POST /api/download (muxed)", `Direct muxed ${v.quality} with audio → instant redirect (no ffmpeg)`, "ok");
+                        } else {
+                          // needsMerge video-only → block if already merging
+                          if (downloading) {
+                            addLog("client ffmpeg", `Blocked: already merging ${downloading.quality}, cancel to start ${v.quality}`, "warn");
+                            // toast via parseError
+                            setParseError(`Already merging ${downloading.quality} — cancel to download ${v.quality}`);
+                            setTimeout(() => setParseError(null), 3000);
+                            return;
+                          }
+                          addLog("POST /api/download (needsMerge)", `Download ${v.quality} clicked — needs merge → ffmpeg.wasm`, "info");
+                        }
                         if (!jobId) return;
                         if ((v as any)._failed) {
                           const err = (v as any).error || "";
+                          addLog("VideoGrid", `Failed video clicked: ${err}`, "error");
                           if (err === "youtube_blocked") {
                             setParseError("YouTube blocked (datacenter IP). Fix: Save Netscape cookies to cookies.txt in project root (or set YTDLP_COOKIES in .env) → restart npm run dev. Or use piped fallback (auto). Check terminal for [processJob] yt-dlp (android) failed reason. Try: 1) https://test-videos.co.uk/vids/sintel/trailer.mp4 2) Different YouTube video");
                             return;
@@ -314,7 +399,47 @@ export default function Home() {
                           v.height || parseInt(v.quality) || undefined;
                         const shouldMerge = v.needsMerge; // any video-only needs audio merge, not just >720p
                         if (shouldMerge) {
+                          const audioUrl = (v as any).audioUrl as string | undefined;
+                          if (audioUrl) {
+                            // Client-side merge (free, no R2) — all qualities with audio, no server storage
+                            addLog("client ffmpeg", `Merging ${v.quality} video+audio in browser (no R2) → ffmpeg.wasm`, "info");
+                            addLog("client ffmpeg", `Video: ${v.url.slice(0, 55)}…`, "info");
+                            addLog("client ffmpeg", `Audio: ${audioUrl.slice(0, 55)}…`, "info");
+                            setDownloading({ quality: v.quality, progress: 5 });
+                            try {
+                              const { mergeVideoAudio } = await import("@/lib/clientMerge");
+                              addLog("client ffmpeg", "Loading ffmpeg.wasm (~30 MB, once)…", "info");
+                              setDownloading({ quality: v.quality, progress: 10 });
+                              // Use proxy stream for all (googlevideo needs CORS bypass via proxy)
+                              const videoFetchUrl = `/api/download/proxy?url=${encodeURIComponent(v.url)}&stream=1`;
+                              const audioFetchUrl = `/api/download/proxy?url=${encodeURIComponent(audioUrl)}&stream=1`;
+                              addLog("client ffmpeg", `Fetching video+audio streams…`, "info");
+                              const blob = await mergeVideoAudio(videoFetchUrl, audioFetchUrl, (pct, msg) => {
+                                setDownloading({ quality: v.quality, progress: Math.max(10, pct), msg });
+                                addLog("client ffmpeg", `${msg} ${pct}%`, "info");
+                              });
+                              addLog("client ffmpeg", `Merge done → ${blob.size} bytes, saving…`, "ok");
+                              const blobUrl = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = blobUrl;
+                              a.download = `${title}_${v.quality}.mp4`;
+                              document.body.appendChild(a);
+                              a.click();
+                              a.remove();
+                              setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+                              setDownloading(null);
+                              addLog("client ffmpeg", `Saved ${title}_${v.quality}.mp4 ✓`, "ok");
+                              return;
+                            } catch (e: any) {
+                              addLog("client ffmpeg", `Merge failed: ${String(e?.message || e).slice(0, 120)} — falling back to R2`, "warn");
+                              console.warn("[client ffmpeg] failed", e);
+                            }
+                          }
+                          // Fallback: server R2 merge (if audioUrl missing or ffmpeg failed) — for single deploy this is direct fallback (silent)
+                          addLog("POST /api/download", `Fallback requesting server merge for ${v.quality} → R2 /merged/${jobId}…`, "info");
                           setDownloading({ quality: v.quality, progress: 10 });
+                          // Mark as direct fallback for single deploy
+                          addLog("R2 /merged", "Single deploy has no ffmpeg worker — will return direct video-only (silent) if client merge unavailable", "warn");
                           const res = await fetch("/api/download", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
@@ -326,80 +451,42 @@ export default function Home() {
                               needsMerge: true,
                             }),
                           });
-                          await res.json();
-                          let tries = 0;
-                          // Live poll every 800ms (was 2500ms dummy) – shows real backend 25→35→70→85→100
-                          const poll = setInterval(async () => {
-                            tries++;
-                            const j = await fetch(`/api/job/${jobId}`).then((r) => r.json());
-                            if (j.progress) setDownloading({ quality: v.quality, progress: j.progress });
-                            const fileUrl = j.fileUrl;
-                            if (fileUrl && j.status === "COMPLETED" && fileUrl !== v.url) {
-                              clearInterval(poll);
-                              // Real download with progress for merged R2 file too
-                              try {
-                                const resp = await fetch(fileUrl);
-                                if (!resp.ok || !resp.body) throw new Error("fetch failed");
-                                const total = Number(resp.headers.get("content-length") || 0);
-                                const reader = resp.body.getReader();
-                                let received = 0;
-                                const chunks: Uint8Array[] = [];
-                                while (true) {
-                                  const { done, value } = await reader.read();
-                                  if (done) break;
-                                  if (value) {
-                                    chunks.push(value);
-                                    received += value.length;
-                                    if (total) {
-                                      const pct = Math.min(95, 85 + Math.round((received / total) * 10));
-                                      setDownloading({ quality: v.quality, progress: pct });
-                                    }
-                                  }
-                                }
-                                const blob = new Blob(chunks as any);
-                                const blobUrl = URL.createObjectURL(blob);
-                                const a = document.createElement("a");
-                                a.href = blobUrl;
-                                a.download = `${title}.mp4`;
-                                document.body.appendChild(a);
-                                a.click();
-                                a.remove();
-                                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-                              } catch {
-                                const a = document.createElement("a");
-                                a.href = fileUrl;
-                                a.download = "";
-                                a.target = "_blank";
-                                document.body.appendChild(a);
-                                a.click();
-                                a.remove();
-                              }
-                              setDownloading(null);
-                            }
-                            if (tries > 120 || j.status === "FAILED") {
-                              clearInterval(poll);
-                              setDownloading(null);
-                            }
-                          }, 800);
+                          const dres = await res.json();
+                          addLog("POST /api/download", `Response: ${dres.status || "COMPLETED"} — fallback single deploy`, dres.status === "FAILED" ? "error" : "info");
+                          // Single deploy has no worker, fileUrl === v.url → don't poll forever, just download video-only with warning
+                          addLog("R2 /merged", "Client merge failed, single deploy cannot merge on server — downloading video-only (silent). Try 720p muxed or retry client merge.", "warn");
+                          setDownloading(null);
+                          addLog("download", `Fallback direct download (silent) → ${v.url.slice(0, 60)}…`, "warn");
+                          const aFallback = document.createElement("a");
+                          aFallback.href = v.url;
+                          aFallback.target = "_blank";
+                          aFallback.rel = "noopener";
+                          document.body.appendChild(aFallback);
+                          aFallback.click();
+                          aFallback.remove();
                           return;
                         }
                         // Direct muxed – YouTube/googlevideo must use anchor (CORS blocks fetch), proxy/twitter can use real fetch progress
                         setDownloading({ quality: v.quality, progress: 5 });
+                        addLog("POST /api/download", `Direct muxed ${v.quality} → no merge, fileUrl set`, "info");
                         console.log(`[download] Direct muxed ${v.quality} -> ${v.url.slice(0, 80)}`);
-                        await fetch("/api/download", {
+                        const needsProxy = /video\.twimg\.com|twimg\.com|fbcdn\.net/.test(v.url);
+                        const d2 = await fetch("/api/download", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ jobId, formatUrl: v.url, height, sourceUrl, needsMerge: v.needsMerge }),
-                        });
-                        const needsProxy = /video\.twimg\.com|twimg\.com|fbcdn\.net/.test(v.url);
+                        }).then((r) => r.json());
+                        addLog("POST /api/download", `Response fileUrl ready → ${needsProxy ? "proxy" : "direct"} stream`, d2.fileUrl ? "ok" : "info");
                         const directUrl = needsProxy ? `/api/download/proxy?url=${encodeURIComponent(v.url)}` : v.url;
                         const isGoogleVideo = /googlevideo\.com/.test(v.url);
                         // googlevideo has no CORS – use anchor 302 (instant), proxy has CORS via same-origin so real progress works
                         if (isGoogleVideo && !needsProxy) {
+                          addLog("download", `googlevideo anchor 302 → ${directUrl.slice(0, 60)}… (CORS blocks fetch)`, "info");
                           console.log(`[download] Triggering anchor for ${v.quality}: ${directUrl.slice(0, 100)}`);
                           setDownloading({ quality: v.quality, progress: 50 });
                           setTimeout(() => {
                             setDownloading(null);
+                            addLog("download", `Anchor triggered for ${v.quality}`, "ok");
                             const a = document.createElement("a");
                             a.href = directUrl;
                             a.target = "_blank";
