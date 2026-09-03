@@ -3,7 +3,6 @@ import { after } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/ratelimit";
 import prisma from "@/lib/prisma";
-import { getQueue, QUEUE_NAMES } from "@/lib/queue";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -86,21 +85,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `DB not configured: ${msg.slice(0, 200)}`, hint: "Set DATABASE_URL on Vercel" }, { status: 503 });
   }
 
-  // Single Vercel deploy: prefer DB queue (after + GET /api/job polling) — don't enqueue to external worker on Vercel
-  // Local dev with `npm run worker` still uses Redis when VERCEL is not set
-  const isVercel = !!process.env.VERCEL;
-  if (!isVercel) {
-    try {
-      const queue = getQueue(QUEUE_NAMES.PARSE);
-      if (queue) {
-        await queue.add("parse", { jobId: job.id, url }, { attempts: 2, backoff: { type: "exponential", delay: 2000 } });
-        console.log(`[parse] enqueued ${job.id} to external worker (local)`);
-        return NextResponse.json({ jobId: job.id, status: "QUEUED" });
-      }
-    } catch (e) { console.warn("[parse] queue failed, using after()", String(e).slice(0,120)); }
-  } else {
-    console.log(`[parse] Vercel single deploy — skip Redis enqueue, using DB queue for ${job.id}`);
-  }
+  // Single deploy everywhere (local = prod): DB queue via after() + GET /api/job polling
+  // REDIS is only for rate-limit (Upstash), not job queue — keeps local/prod identical
+  console.log(`[parse] single deploy DB queue for ${job.id} (local=prod)`);
 
   // Vercel-only after() — direct call avoids self-fetch loop in dev, same as worker file
   try {
