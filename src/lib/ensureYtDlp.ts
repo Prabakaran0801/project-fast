@@ -17,25 +17,38 @@ export function ensureYtDlpPath(): string | undefined {
       return process.env.YOUTUBE_DL_PATH;
     }
     // include /ROOT variant seen on Vercel (cwd /ROOT in logs) + standalone linux binary (no python needed)
-    const candidates = [
-      path.join(process.cwd(), "node_modules/yt-dlp-exec/bin/yt-dlp_linux"),
-      path.join(process.cwd(), "node_modules/yt-dlp-exec/bin/yt-dlp"),
-      path.join(process.cwd(), "node_modules/yt-dlp-exec/bin/yt-dlp.exe"),
-      "/var/task/node_modules/yt-dlp-exec/bin/yt-dlp_linux",
-      "/var/task/node_modules/yt-dlp-exec/bin/yt-dlp",
-      "/var/task/node_modules/yt-dlp-exec/bin/yt-dlp.exe",
-      "/ROOT/node_modules/yt-dlp-exec/bin/yt-dlp_linux",
-      "/ROOT/node_modules/yt-dlp-exec/bin/yt-dlp",
-      "/ROOT/node_modules/yt-dlp-exec/bin/yt-dlp.exe",
-      path.join(__dirname, "../../node_modules/yt-dlp-exec/bin/yt-dlp_linux"),
-      path.join(__dirname, "../../node_modules/yt-dlp-exec/bin/yt-dlp"),
-      // fallback to constants path
-      (() => { try { return require("yt-dlp-exec/src/constants").YOUTUBE_DL_PATH; } catch { return undefined; } })() as string,
-    ].filter(Boolean) as string[];
+    // On Windows prefer .exe, on Linux prefer _linux then script
+    const isWin = process.platform === "win32";
+    const orderedNames = isWin
+      ? ["yt-dlp.exe", "yt-dlp", "yt-dlp_linux"]
+      : ["yt-dlp_linux", "yt-dlp", "yt-dlp.exe"];
+    const bases = [
+      path.join(process.cwd(), "node_modules/yt-dlp-exec/bin"),
+      "/var/task/node_modules/yt-dlp-exec/bin",
+      "/ROOT/node_modules/yt-dlp-exec/bin",
+      path.join(__dirname, "../../node_modules/yt-dlp-exec/bin"),
+    ];
+    const candidates: string[] = [];
+    for (const base of bases) for (const name of orderedNames) candidates.push(path.join(base, name));
+    candidates.push((() => { try { return require("yt-dlp-exec/src/constants").YOUTUBE_DL_PATH; } catch { return undefined; } })() as string);
+    const finalCandidates = candidates.filter(Boolean) as string[];
 
-    for (const p of candidates) {
+    for (const p of finalCandidates) {
       try {
         if (fs.existsSync(p)) {
+          // If it's the python script (yt-dlp without _linux/.exe) and python missing, skip it — need standalone
+          const isScript = p.endsWith("/yt-dlp") && !p.endsWith("_linux");
+          if (isScript) {
+            try {
+              const { execSync } = require("child_process");
+              execSync("python3 --version", { stdio: "ignore" });
+            } catch {
+              try { require("child_process").execSync("python --version", { stdio: "ignore" }); } catch {
+                console.log(`[yt-dlp] skipping script ${p} (no python3)`);
+                continue;
+              }
+            }
+          }
           // ensure executable
           try { fs.chmodSync(p, 0o755); } catch {}
           process.env.YOUTUBE_DL_PATH = p;
@@ -54,7 +67,7 @@ export function ensureYtDlpPath(): string | undefined {
         }
       } catch {}
     }
-    console.warn(`[yt-dlp] binary not found in candidates: ${candidates.join(", ")}`);
+    console.warn(`[yt-dlp] binary not found in candidates: ${finalCandidates.join(", ")}`);
     // Try to use python fallback if available (Vercel rarely has python3, but check)
     try {
       const { execSync } = require("child_process");

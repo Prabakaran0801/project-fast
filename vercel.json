@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "buildCommand": "prisma generate && next build",
-  "installCommand": "YOUTUBE_DL_FILENAME=yt-dlp_linux npm install",
+  "buildCommand": "node scripts/ensure-yt-dlp.js && prisma generate && next build",
+  "installCommand": "npm install",
   "regions": ["iad1"],
   "crons": [
     {
