@@ -10,10 +10,11 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
   const proxyArgs = getYtDlpProxyArgs();
   const proxyUrl = getProxyUrl();
   if (proxyUrl) console.log(`[youtube] proxy ${proxyUrl.replace(/:[^:/@]+@/, "://***@")} for ${jobId}`);
-  // Try default (visionos/discovery full DASH 144p-2160p) first, then web/android fallbacks.
-  // Prefer NO proxy — the configured proxy can be dead (402 Payment Required) and is only a last resort.
-  // YouTube 429/rate-limit is retried without proxy after a short sleep. Never throw on proxy failure.
-  const clients = ["default", "web", "android", "tv"] as const;
+  // Hobby 10s fast-path: single default client (visionos full DASH 144p-2160p) — proven to return 8 in <6s on prod.
+  // Multi-client fallback (web/android/tv) only if default fails — keeps Vercel Hobby within maxDuration=10.
+  // Prefer NO proxy — dead proxy 407 is last resort only.
+  const isHobbyFastPath = process.env.VERCEL === "1" || process.env.HOBBY_FAST_PATH === "1";
+  const clients: readonly string[] = isHobbyFastPath ? (["default"] as const) : (["default", "web", "android", "tv"] as const);
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   // yt-dlp auto-reads HTTP_PROXY/HTTPS_PROXY/ALL_PROXY from the environment. When we want to run WITHOUT a
   // proxy (the working default), we must strip them — otherwise a dead proxy in .env (402 Payment Required)
@@ -30,13 +31,12 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
       if (useFree) (args as any).preferFreeFormats = true;
       if (client !== "web" && client !== "default") args.extractorArgs = `youtube:player_client=${client}`;
       if (withProxy && proxyArgs.proxy) console.log(`[youtube] proxy ${String(proxyArgs.proxy).replace(/:[^:/@]+@/, "://***@")} for ${jobId}`);
-      // yt-dlp-exec passes the 3rd arg (opts) to execa. execa MERGES opts.env with process.env unless
-      // extendEnv:false — so we must both strip the proxy vars AND set extendEnv:false. Otherwise the dead
-      // proxy in .env (HTTP(S)_PROXY, 402 Payment Required) silently hijacks all no-proxy yt-dlp traffic.
       const opts = withProxy ? undefined : { env: stripProxyEnv(), extendEnv: false };
+      // Hobby timeout is shorter to fit maxDuration=10 (8s vs 22s local)
+      const timeoutMs = isHobbyFastPath ? 8000 : 22000;
       return await Promise.race([
         ytdlp(url, args, opts),
-        new Promise((_, rej) => setTimeout(() => rej(new Error("yt-dlp timeout")), 22000)),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("yt-dlp timeout")), timeoutMs)),
       ]);
     } catch (e: any) {
       return { __error: e };
