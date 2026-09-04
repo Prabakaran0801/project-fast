@@ -71,11 +71,16 @@ export function VideoGrid({
                   <span className="text-[11px] font-mono tracking-[0.14em]">NO PREVIEW</span>
                 </div>
               )}
-              <div className="absolute top-3 left-3 flex gap-1.5">
+              <div className="absolute top-3 left-3 flex gap-1.5 flex-wrap">
                 <Badge variant="secondary" className="font-mono text-[10px] tracking-[0.12em] bg-zinc-800 border-zinc-700 text-zinc-200 px-2 py-1 rounded-full">
                   {v.ext.toUpperCase()}
                 </Badge>
                 <Badge className="font-mono text-[10px] tracking-[0.12em] rounded-full px-2 py-1 bg-white text-zinc-900">{v.quality}</Badge>
+                {v.hasAudio ? (
+                  <Badge className="font-mono text-[10px] tracking-[0.12em] rounded-full px-2 py-1 bg-emerald-500 text-white border-0">🔊 AUDIO</Badge>
+                ) : v.needsMerge ? (
+                  <Badge variant="secondary" className="font-mono text-[10px] tracking-[0.12em] rounded-full px-2 py-1 bg-amber-500 text-zinc-900 border-0">🔇 VIDEO-ONLY</Badge>
+                ) : null}
               </div>
             </div>
             <CardContent className="p-4 flex items-center justify-between gap-3">
@@ -96,9 +101,10 @@ export function VideoGrid({
                   size="sm"
                   onClick={() => onDownload(v)}
                   aria-label={`Download ${v.quality}`}
-                  className="shrink-0 rounded-full gap-1.5 bg-white text-zinc-900 hover:bg-zinc-200 h-8 px-4 text-xs font-medium"
+                  className={`shrink-0 rounded-full gap-1.5 h-8 px-4 text-xs font-medium ${v.needsMerge ? "bg-amber-500 text-zinc-900 hover:bg-amber-400" : "bg-white text-zinc-900 hover:bg-zinc-200"}`}
+                  title={v.needsMerge ? "Requires browser merge (video+audio) — may fail if 502" : "Direct download with audio"}
                 >
-                  <Download className="h-3.5 w-3.5" aria-hidden /> Download
+                  <Download className="h-3.5 w-3.5" aria-hidden /> {v.needsMerge ? "Merge & Download" : "Download"}
                 </Button>
               </motion.div>
             </CardContent>

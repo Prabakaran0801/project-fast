@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Header } from "@/components/Header";
 import { LinkInput } from "@/components/LinkInput";
@@ -23,6 +23,7 @@ export default function Home() {
   const [expiredVideo, setExpiredVideo] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const mergeAbortRef = useRef<AbortController | null>(null);
 
   function addLog(route: string, msg: string, level: LogEntry["level"] = "info") {
     const now = new Date();
@@ -340,6 +341,8 @@ export default function Home() {
                             <button
                               onClick={() => {
                                 addLog("client ffmpeg", `Cancelled ${downloading.quality} merge by user`, "warn");
+                                try { mergeAbortRef.current?.abort(); } catch {}
+                                mergeAbortRef.current = null;
                                 setDownloading(null);
                               }}
                               className="h-7 px-3 rounded-full bg-zinc-800 border border-zinc-700 text-[11px] font-mono text-zinc-300 hover:text-white hover:bg-zinc-700"
@@ -347,9 +350,9 @@ export default function Home() {
                               Cancel
                             </button>
                           </div>
-                          <p className="text-[10px] font-mono text-amber-400/80 mt-1 text-center">
-                            Blocked: finish or cancel to download other format
-                          </p>
+                            <p className="text-[10px] font-mono text-amber-400/80 mt-1 text-center">
+                             Single download: clicking another quality will cancel current merge and start new
+                           </p>
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -362,13 +365,14 @@ export default function Home() {
                         if (!v.needsMerge) {
                           addLog("POST /api/download (muxed)", `Direct muxed ${v.quality} with audio → instant redirect (no ffmpeg)`, "ok");
                         } else {
-                          // needsMerge video-only → block if already merging
-                          if (downloading) {
-                            addLog("client ffmpeg", `Blocked: already merging ${downloading.quality}, cancel to start ${v.quality}`, "warn");
-                            // toast via parseError
-                            setParseError(`Already merging ${downloading.quality} — cancel to download ${v.quality}`);
-                            setTimeout(() => setParseError(null), 3000);
-                            return;
+                          // needsMerge: single download at a time — abort current and start new
+                          if (downloading && mergeAbortRef.current) {
+                            addLog("client ffmpeg", `Switching: aborting ${downloading.quality} → starting ${v.quality}`, "warn");
+                            try { mergeAbortRef.current.abort(); } catch {}
+                            mergeAbortRef.current = null;
+                            setDownloading(null);
+                            // brief yield to let abort propagate
+                            await new Promise((r) => setTimeout(r, 120));
                           }
                           addLog("POST /api/download (needsMerge)", `Download ${v.quality} clicked — needs merge → ffmpeg.wasm`, "info");
                         }
@@ -409,15 +413,19 @@ export default function Home() {
                             try {
                               const { mergeVideoAudio } = await import("@/lib/clientMerge");
                               addLog("client ffmpeg", "Loading ffmpeg.wasm (~30 MB, once)…", "info");
+                              const controller = new AbortController();
+                              mergeAbortRef.current = controller;
                               setDownloading({ quality: v.quality, progress: 10 });
-                              // Use proxy stream for all (googlevideo needs CORS bypass via proxy)
+                              // googlevideo requires proxy to bypass CORS (browser fetch blocked), proxy streams from same Vercel IP as yt-dlp extraction
                               const videoFetchUrl = `/api/download/proxy?url=${encodeURIComponent(v.url)}&stream=1`;
                               const audioFetchUrl = `/api/download/proxy?url=${encodeURIComponent(audioUrl)}&stream=1`;
-                              addLog("client ffmpeg", `Fetching video+audio streams…`, "info");
+                              addLog("client ffmpeg", `Fetching video+audio streams… (proxy, parallel)`, "info");
                               const blob = await mergeVideoAudio(videoFetchUrl, audioFetchUrl, (pct, msg) => {
+                                if (controller.signal.aborted) return;
                                 setDownloading({ quality: v.quality, progress: Math.max(10, pct), msg });
                                 addLog("client ffmpeg", `${msg} ${pct}%`, "info");
-                              });
+                              }, { signal: controller.signal });
+                              mergeAbortRef.current = null;
                               addLog("client ffmpeg", `Merge done → ${blob.size} bytes, saving…`, "ok");
                               const blobUrl = URL.createObjectURL(blob);
                               const a = document.createElement("a");
@@ -431,39 +439,32 @@ export default function Home() {
                               addLog("client ffmpeg", `Saved ${title}_${v.quality}.mp4 ✓`, "ok");
                               return;
                             } catch (e: any) {
-                              addLog("client ffmpeg", `Merge failed: ${String(e?.message || e).slice(0, 120)} — falling back to R2`, "warn");
+                              mergeAbortRef.current = null;
+                              if (e?.name === "AbortError" || String(e?.message).includes("Aborted")) {
+                                addLog("client ffmpeg", `Aborted ${v.quality} — switched to new download`, "warn");
+                                setDownloading(null);
+                                return;
+                              }
+                              const errMsg = String(e?.message || e);
+                              addLog("client ffmpeg", `Merge failed: ${errMsg.slice(0, 140)}`, "error");
                               console.warn("[client ffmpeg] failed", e);
+                              setDownloading(null);
+                              // Do NOT fallback to silent video — confusing. Show actionable error.
+                              const is502 = errMsg.includes("502") || errMsg.includes("403") || errMsg.includes("Upstream");
+                              const hint = is502
+                                ? `Merge failed (HTTP 502 — googlevideo IP/expire). This YouTube URL's streams expired or are IP-locked. Fix: Re-parse the same link to get fresh URLs, then retry 720p. Or download the green 🔊 AUDIO badge (muxed) which never needs merge.`
+                                : `Merge failed: ${errMsg.slice(0, 100)}. Try re-parsing or use 🔊 AUDIO (muxed) quality.`;
+                              addLog("client ffmpeg", hint, "error");
+                              setParseError(hint);
+                              setTimeout(() => setParseError(null), 8000);
+                              return;
                             }
                           }
-                          // Fallback: server R2 merge (if audioUrl missing or ffmpeg failed) — for single deploy this is direct fallback (silent)
-                          addLog("POST /api/download", `Fallback requesting server merge for ${v.quality} → R2 /merged/${jobId}…`, "info");
-                          setDownloading({ quality: v.quality, progress: 10 });
-                          // Mark as direct fallback for single deploy
-                          addLog("R2 /merged", "Single deploy has no ffmpeg worker — will return direct video-only (silent) if client merge unavailable", "warn");
-                          const res = await fetch("/api/download", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              jobId,
-                              formatUrl: v.url,
-                              height,
-                              sourceUrl,
-                              needsMerge: true,
-                            }),
-                          });
-                          const dres = await res.json();
-                          addLog("POST /api/download", `Response: ${dres.status || "COMPLETED"} — fallback single deploy`, dres.status === "FAILED" ? "error" : "info");
-                          // Single deploy has no worker, fileUrl === v.url → don't poll forever, just download video-only with warning
-                          addLog("R2 /merged", "Client merge failed, single deploy cannot merge on server — downloading video-only (silent). Try 720p muxed or retry client merge.", "warn");
+                          // No audioUrl available — cannot merge
+                          addLog("client ffmpeg", `No audioUrl for ${v.quality} — cannot merge`, "error");
                           setDownloading(null);
-                          addLog("download", `Fallback direct download (silent) → ${v.url.slice(0, 60)}…`, "warn");
-                          const aFallback = document.createElement("a");
-                          aFallback.href = v.url;
-                          aFallback.target = "_blank";
-                          aFallback.rel = "noopener";
-                          document.body.appendChild(aFallback);
-                          aFallback.click();
-                          aFallback.remove();
+                          setParseError(`No audio stream found for ${v.quality}. Please choose a 🔊 AUDIO (muxed) quality like 360p, or re-parse.`);
+                          setTimeout(() => setParseError(null), 6000);
                           return;
                         }
                         // Direct muxed – YouTube/googlevideo must use anchor (CORS blocks fetch), proxy/twitter can use real fetch progress

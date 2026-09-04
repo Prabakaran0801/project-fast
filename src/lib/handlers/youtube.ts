@@ -1,7 +1,7 @@
 import { pickAllFormats } from "./utils/pickAllFormats";
 import { getCookiesPath } from "./utils/cookies";
 import { getYtDlpProxyArgs, getProxyUrl, getFetchDispatcher } from "./utils/proxy";
-import { ensureYtDlpPath, ensureYtDlpBinaryDownloaded } from "../ensureYtDlp";
+import { ensureYtDlpPath } from "../ensureYtDlp";
 
 export async function youtubeHandler(url: string, jobId: string, existing: any[]): Promise<any[]> {
   ensureYtDlpPath();
@@ -10,87 +10,114 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
   const proxyArgs = getYtDlpProxyArgs();
   const proxyUrl = getProxyUrl();
   if (proxyUrl) console.log(`[youtube] proxy ${proxyUrl.replace(/:[^:/@]+@/, "://***@")} for ${jobId}`);
-  // Try web/android first, 10s timeout, without proxy first (proxy 402 Payment Required currently)
-  const clients = ["web", "android"] as const;
-  let proxyDisabled = false;
+  // Try default (visionos/discovery full DASH 144p-2160p) first, then web/android fallbacks.
+  // Prefer NO proxy — the configured proxy can be dead (402 Payment Required) and is only a last resort.
+  // YouTube 429/rate-limit is retried without proxy after a short sleep. Never throw on proxy failure.
+  const clients = ["default", "web", "android", "tv"] as const;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // yt-dlp auto-reads HTTP_PROXY/HTTPS_PROXY/ALL_PROXY from the environment. When we want to run WITHOUT a
+  // proxy (the working default), we must strip them — otherwise a dead proxy in .env (402 Payment Required)
+  // silently routes ALL yt-dlp traffic through it and the parse fails with youtube_blocked.
+  const stripProxyEnv = () => {
+    const next: Record<string, string | undefined> = { ...process.env };
+    for (const k of ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "no_proxy", "NO_PROXY"]) delete next[k];
+    return next;
+  };
+  const runYtDlp = async (client: string, useFree: boolean, withCookies: boolean, withProxy: boolean): Promise<any> => {
+    try {
+      const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
+      const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...(withProxy && proxyArgs.proxy ? { proxy: proxyArgs.proxy } : {}), ...(withCookies ? { cookies: cookiesPath! } : {}) };
+      if (useFree) (args as any).preferFreeFormats = true;
+      if (client !== "web" && client !== "default") args.extractorArgs = `youtube:player_client=${client}`;
+      if (withProxy && proxyArgs.proxy) console.log(`[youtube] proxy ${String(proxyArgs.proxy).replace(/:[^:/@]+@/, "://***@")} for ${jobId}`);
+      // yt-dlp-exec passes the 3rd arg (opts) to execa. execa MERGES opts.env with process.env unless
+      // extendEnv:false — so we must both strip the proxy vars AND set extendEnv:false. Otherwise the dead
+      // proxy in .env (HTTP(S)_PROXY, 402 Payment Required) silently hijacks all no-proxy yt-dlp traffic.
+      const opts = withProxy ? undefined : { env: stripProxyEnv(), extendEnv: false };
+      return await Promise.race([
+        ytdlp(url, args, opts),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("yt-dlp timeout")), 22000)),
+      ]);
+    } catch (e: any) {
+      return { __error: e };
+    }
+  };
+
+  // Phase 1: no-proxy multi-client search (default first — returns 144p-2160p full catalog)
   for (const withCookies of [false, true] as const) {
     if (withCookies && !cookiesPath) continue;
     for (const client of clients) {
       for (const useFree of [true, false] as const) {
-        let info: any = null;
-        let lastErr: any = null;
-        // Try without proxy first, then with proxy if bot/402 — avoids 402 Payment Required when proxy out of credit
-        for (const withProxy of [false, true] as const) {
-          if (withProxy && (!proxyUrl || proxyDisabled)) continue;
+        const cur: any = await runYtDlp(client, useFree, withCookies, false);
+        if (cur && !cur.__error) {
           try {
-            const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
-            const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...(withProxy ? proxyArgs : {}), ...(withCookies ? { cookies: cookiesPath! } : {}) };
-            if (useFree) (args as any).preferFreeFormats = true;
-            if (client !== "web") args.extractorArgs = `youtube:player_client=${client}`;
-            const cur: any = await Promise.race([
-              ytdlp(url, args),
-              new Promise((_, rej) => setTimeout(() => rej(new Error("yt-dlp timeout 10s")), 10000)),
-            ]);
-            info = cur;
-            if (withProxy) console.log(`[youtube] (${client} with proxy) succeeded`);
-            break;
+            const formats = pickAllFormats(cur, 8);
+            if (formats.length > best.length) {
+              best = formats;
+              console.log(`[youtube] (${client}${withCookies ? " +cookies" : ""}${useFree ? " free" : ""}) found ${formats.length} for ${jobId} heights=${formats.map((f: any) => f.quality).join(",")}`);
+            }
+            if (best.length >= 4) break;
           } catch (e: any) {
-            lastErr = e;
-            const msg = String((e as any)?.stderr || e?.message || e);
-            const isProxy402 = msg.includes("402") || msg.includes("Payment Required");
-            const isBot = msg.includes("bot") || msg.includes("429") || msg.includes("Sign in");
-            if (isProxy402 && withProxy) {
-              console.warn(`[youtube] proxy 402 Payment Required — disabling proxy for this job`);
-              proxyDisabled = true;
-            }
-            // If without proxy failed with bot/429, retry with proxy (if not disabled)
-            if (!withProxy && (isBot || isProxy402) && !proxyDisabled) continue;
-            if (withProxy && isProxy402) {
-              continue;
-            }
-            // For other errors, don't retry with proxy, throw to outer catch
-            throw e;
+            console.warn(`[youtube] (${client}${withCookies ? " +cookies" : ""}${useFree ? " free" : ""}) failed`, String((e as any)?.stderr || e?.message || e).slice(0, 300));
           }
-        }
-        if (!info) throw lastErr;
-        try {
-          const formats = pickAllFormats(info, 8);
-          if (formats.length > best.length) {
-            best = formats;
-            console.log(`[youtube] (${client}${withCookies ? " +cookies" : ""}${useFree ? " free" : ""}) found ${formats.length} for ${jobId} heights=${formats.map((f: any) => f.quality).join(",")}`);
-          }
-          if (best.length >= 4) break;
-        } catch (e: any) {
-          let full = String((e as any)?.stderr || (e as any)?.shortMessage || e?.message || e).slice(0, 600);
-          // If python missing, try downloading standalone yt-dlp_linux and retry once
-          if (full.includes("python3") || full.includes("No such file")) {
-            console.log(`[youtube] python missing, trying standalone download for ${jobId}`);
-            const dl = await ensureYtDlpBinaryDownloaded();
-            if (dl) {
+        } else {
+          const err: any = cur?.__error;
+          const msg = String(err?.stderr || err?.message || "");
+          if (msg.includes("429") || msg.includes("rate") || msg.includes("Too Many") || msg.includes("Try again") || msg.includes("bot") || msg.includes("Sign in")) {
+            // transient rate-limit: one backoff retry then move on
+            console.warn(`[youtube] (${client}${useFree ? " free" : ""}) rate-limit, backoff for ${jobId}`);
+            await sleep(1500);
+            const cur2: any = await runYtDlp(client, useFree, withCookies, false);
+            if (cur2 && !cur2.__error) {
               try {
-                const ytdlp2: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
-                const args2: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...proxyArgs, ...(withCookies ? { cookies: cookiesPath! } : {}) };
-                if (useFree) (args2 as any).preferFreeFormats = true;
-                if (client !== "web") args2.extractorArgs = `youtube:player_client=${client}`;
-                const info2: any = await ytdlp2(url, args2);
-                const fmts2 = pickAllFormats(info2, 8);
-                if (fmts2.length) {
-                  console.log(`[youtube] (${client} retry-standalone) found ${fmts2.length} for ${jobId}`);
-                  if (fmts2.length > best.length) best = fmts2;
-                  if (best.length >= 4) break;
-                  continue;
+                const formats = pickAllFormats(cur2, 8);
+                if (formats.length > best.length) {
+                  best = formats;
+                  console.log(`[youtube] (${client}${withCookies ? " +cookies" : ""}${useFree ? " free" : ""}) retry found ${formats.length} for ${jobId}`);
                 }
-              } catch (e2: any) {
-                full = String((e2 as any)?.stderr || e2?.message || e2).slice(0, 600);
-              }
+                if (best.length >= 4) break;
+              } catch {}
             }
+          } else {
+            console.warn(`[youtube] (${client}${useFree ? " free" : ""}) no-proxy failed`, String(err?.stderr || err?.message || err).slice(0, 180));
           }
-          console.warn(`[youtube] (${client}${withCookies ? " +cookies" : ""}${useFree ? " free" : ""}) failed`, full.slice(0, 350));
         }
       }
       if (best.length >= 4) break;
     }
     if (best.length >= 4) break;
+  }
+
+  // Phase 2 (last resort): proxy, only if direct failed. Dead proxy (402) is skipped, never throws.
+  if (best.length === 0 && proxyUrl) {
+    for (const withCookies of [false, true] as const) {
+      if (withCookies && !cookiesPath) continue;
+      for (const client of ["default", "web", "android", "tv"] as const) {
+        for (const useFree of [true, false] as const) {
+          const cur: any = await runYtDlp(client, useFree, withCookies, true);
+          if (cur && !cur.__error) {
+            try {
+              const formats = pickAllFormats(cur, 8);
+              if (formats.length > best.length) {
+                best = formats;
+                console.log(`[youtube] (${client} via proxy) found ${formats.length} for ${jobId}`);
+              }
+              if (best.length >= 4) break;
+            } catch {}
+          } else {
+            const err: any = cur?.__error;
+            const msg = String(err?.stderr || err?.message || "");
+            if (msg.includes("402") || msg.includes("Payment Required")) {
+              console.warn(`[youtube] proxy 402 Payment Required — skipping dead proxy for this job`);
+              break;
+            }
+            console.warn(`[youtube] (${client} via proxy) failed`, msg.slice(0, 150));
+          }
+        }
+        if (best.length >= 4) break;
+      }
+      if (best.length >= 4) break;
+    }
   }
   // piped fallback if still empty
   if (best.length === 0) {

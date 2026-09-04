@@ -289,10 +289,18 @@ const parseWorker = new Worker(
       const isInstagram = /instagram\.com/.test(url);
       const isUniversal = !isYoutube && !isInstagram && !/\.(mp4|webm|mov)(\?|$)/i.test(url);
 
-      // FROZEN: YouTube — web first multi-client (keep exact logic)
+      // FROZEN: YouTube — default (visionos full DASH) first, then multi-client fallback
+      // NOTE: as of yt-dlp 2026, web/ios/tv clients are bot-blocked (null/403); default client returns full catalog
       if (isYoutube) {
         let best: any[] = detected;
-        const clients = ["web", "android", "ios", "tv"];
+        const clients = ["default", "web", "android", "ios", "tv"];
+        // yt-dlp auto-reads HTTP(S)_PROXY from env; strip them when running without a proxy, else a
+        // dead proxy in .env (402) hijacks all traffic -> youtube_blocked
+        const stripProxyEnv = () => {
+          const next: Record<string, string | undefined> = { ...process.env };
+          for (const k of ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "no_proxy", "NO_PROXY"]) delete next[k];
+          return next;
+        };
         for (const withCookies of [false, true] as const) {
           const cookiesPath = process.env.YTDLP_COOKIES || (fs.existsSync(path.join(process.cwd(), "cookies.txt")) ? path.join(process.cwd(), "cookies.txt") : undefined);
           if (withCookies && !cookiesPath) continue;
@@ -300,10 +308,14 @@ const parseWorker = new Worker(
             for (const useFree of [true, false] as const) {
               try {
                 const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
-                const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...getYtDlpProxyArgs(), ...(cookiesPath ? { cookies: cookiesPath } : {}) };
+                const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...(cookiesPath ? { cookies: cookiesPath } : {}) };
                 if (useFree) (args as any).preferFreeFormats = true;
-                if (client !== "web") args.extractorArgs = `youtube:player_client=${client}`;
-                const info: any = await ytdlp(url, args);
+                if (client !== "web" && client !== "default") args.extractorArgs = `youtube:player_client=${client}`;
+                // no-proxy first (default client) with env stripped; execa merges env so set extendEnv:false
+                const info: any = await Promise.race([
+                  ytdlp(url, args, { env: stripProxyEnv(), extendEnv: false }),
+                  new Promise((_, rej) => setTimeout(() => rej(new Error("yt-dlp timeout")), 22000)),
+                ]);
                 const formats = pickAllFormats(info, 8);
                 if (formats.length > best.length) {
                   best = formats;

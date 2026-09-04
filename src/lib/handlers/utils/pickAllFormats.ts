@@ -17,12 +17,18 @@ export function pickAllFormats(info: any, max = 8) {
     if (key === "Default" || key === "low" || key.includes("DRC")) continue;
     const isHls = f.protocol === "m3u8" || f.protocol === "m3u8_native" || String(f.url).includes(".m3u8") || String(f.url).includes("manifest.googlevideo.com");
     if (isHls) continue;
-    const score = (x: any) => (x.acodec !== "none" ? 3 : 0) + (x.ext === "mp4" ? 2 : 0) + (x.height || 0) / 1000;
+    const score = (x: any) => (x.acodec !== "none" ? 100 : 0) + (x.ext === "mp4" ? 2 : 0) + (x.height || 0) / 1000;
     const existing = byHeight.get(key);
     if (!existing || score(f) > score(existing)) byHeight.set(key, f);
   }
   let pool = Array.from(byHeight.values())
-    .sort((a, b) => (b.height || 0) - (a.height || 0))
+    .sort((a, b) => {
+      // muxed first, then by height descending
+      const aMux = a.acodec !== "none" ? 1 : 0;
+      const bMux = b.acodec !== "none" ? 1 : 0;
+      if (aMux !== bMux) return bMux - aMux;
+      return (b.height || 0) - (a.height || 0);
+    })
     .slice(0, max);
   if (!pool.length) pool = formats.filter((f: any) => f.height).slice(0, max);
   if (!pool.length) pool = formats.slice(0, max);
@@ -80,11 +86,16 @@ export function pickAllFormatsWorker(info: any, max = 8) {
     if (f.ext === "mhtml") continue;
     const h = f.height;
     const existing = byHeight.get(h);
-    const score = (x: any) => (x.acodec !== "none" ? 2 : 0) + (x.ext === "mp4" ? 1 : 0);
+    const score = (x: any) => (x.acodec !== "none" ? 100 : 0) + (x.ext === "mp4" ? 1 : 0);
     if (!existing || score(f) > score(existing)) byHeight.set(h, f);
   }
   const sorted = Array.from(byHeight.values())
-    .sort((a, b) => b.height - a.height)
+    .sort((a, b) => {
+      const aMux = a.acodec !== "none" ? 1 : 0;
+      const bMux = b.acodec !== "none" ? 1 : 0;
+      if (aMux !== bMux) return bMux - aMux;
+      return b.height - a.height;
+    })
     .slice(0, max);
   const pool = sorted.length ? sorted : formats.filter((f) => f.url && !isHls(f) && !isStoryboard(f)).slice(0, max);
   const title = (info.title || "").replace(/[^a-z0-9_\- ]/gi, "").replace(/\s+/g, "_").slice(0, 40) || "video";
