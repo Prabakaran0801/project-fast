@@ -66,9 +66,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           try { await prisma.downloadJob.update({ where: { id }, data: { status: "FAILED", progress: 100, detectedUrls: [{ url: job.sourceUrl, quality: "auto", ext: "mp4", thumbnail: "", hasAudio: false, needsMerge: false, _failed: true, error: "blocked_or_unsupported" } as any] } }); job = (await prisma.downloadJob.findUnique({ where: { id } })) || job; } catch {}
         }
       } else {
-        // YouTube: advance exactly one step this poll (one Vercel invocation <6s)
+        // YouTube: advance exactly one step this poll — atomic claim via attemptIndex to avoid overlapping polls race
         const currentIndex = (job as any).attemptIndex ?? 0;
         const currentPartial = ((job as any).partialFormats as any[]) ?? [];
+
+        // Claim this step atomically — only proceed if no other in-flight request has advanced past currentIndex
+        const claim = await prisma.downloadJob.updateMany({
+          where: { id, attemptIndex: currentIndex, status: "PARSING" },
+          data: { attemptIndex: currentIndex },
+        });
+        if (claim.count === 0) {
+          // Another concurrent poll already advanced this job
+          return NextResponse.json(job);
+        }
 
         try {
           const { formats, nextStepIndex, done } = await runOneYoutubeStep(
@@ -89,25 +99,18 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
                 } as any]
               : formats;
 
-            await prisma.downloadJob.update({
-              where: { id },
-              data: {
-                status: isFailed ? "FAILED" : "COMPLETED",
-                progress: 100,
-                detectedUrls: finalFormats,
-                expiresAt,
-              },
+            await prisma.downloadJob.updateMany({
+              where: { id, attemptIndex: currentIndex },
+              data: { status: isFailed ? "FAILED" : "COMPLETED", progress: 100, detectedUrls: finalFormats, expiresAt, attemptIndex: nextStepIndex } as any,
             });
             job = (await prisma.downloadJob.findUnique({ where: { id } })) || job;
           } else {
             const progressPct = Math.min(80, 10 + nextStepIndex * 12);
-            await prisma.downloadJob.update({
-              where: { id },
-              data: { attemptIndex: nextStepIndex, partialFormats: formats, progress: progressPct },
+            await prisma.downloadJob.updateMany({
+              where: { id, attemptIndex: currentIndex },
+              data: { attemptIndex: nextStepIndex, partialFormats: formats, progress: progressPct } as any,
             });
-            job.progress = progressPct as any;
-            (job as any).attemptIndex = nextStepIndex;
-            (job as any).partialFormats = formats;
+            job = (await prisma.downloadJob.findUnique({ where: { id } })) || job;
           }
         } catch (e: any) {
           console.warn(`[job] stepper failed for ${id} step ${currentIndex}`, String(e?.message || e).slice(0, 200));

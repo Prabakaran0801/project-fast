@@ -74,7 +74,10 @@ export default function Home() {
     addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `Polling job ${jobId} — status check every 1.2s`, "info");
     addLog("DB queue", "Job QUEUED → PARSING via processSingleJob (routeHandlers: youtube/instagram/universal)", "info");
     let pollCount = 0;
+    let inFlight = false;
     const interval = setInterval(async () => {
+      if (inFlight) return;
+      inFlight = true;
       pollCount++;
       try {
         const res = await fetch(`/api/job/${jobId}`);
@@ -157,6 +160,8 @@ export default function Home() {
         }
       } catch (e) {
         addLog(`GET /api/job/${jobId.slice(0, 8)}…`, `Poll error: ${String(e).slice(0, 60)}`, "error");
+      } finally {
+        inFlight = false;
       }
     }, 1200);
     addLog(`GET /api/job/${jobId.slice(0, 8)}…`, "Initial fetch for immediate status", "info");
