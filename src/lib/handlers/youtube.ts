@@ -119,18 +119,41 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
       if (best.length >= 4) break;
     }
   }
-  // piped fallback if still empty — Hobby: single host fast, local: 3 hosts
+  // Hobby: try piped first (datacenter IP blocks yt-dlp, piped is faster and bypasses bot)
+  if (isHobbyFastPath && best.length === 0) {
+    try {
+      const idMatch = url.match(/(?:v=|\.be\/)([a-zA-Z0-9_-]{11})/);
+      const vid = idMatch ? idMatch[1] : null;
+      if (vid) {
+        const pipedHosts = ["https://pipedapi.kavin.rocks"];
+        const pipedDispatcher = (() => { try { return getFetchDispatcher(); } catch { return undefined; } })();
+        for (const host of pipedHosts) {
+          try {
+            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) };
+            if (pipedDispatcher) pipedOpts.dispatcher = pipedDispatcher;
+            const r = await fetch(`${host}/streams/${vid}`, pipedOpts);
+            if (!r.ok) continue;
+            const pj: any = await r.json();
+            const streams: any[] = [...(pj.videoStreams || []), ...(pj.audioStreams || [])];
+            const mapped = streams.filter((s: any) => s.url).map((s: any) => ({ url: s.url, quality: s.quality || (s.height ? `${s.height}p` : "best"), height: s.height || parseInt(s.quality) || undefined, ext: (s.mimeType || "video/mp4").split("/")[1]?.split(";")[0] || "mp4", hasAudio: !!s.audioTrackName || s.mimeType?.includes("audio") || false, needsMerge: false, title: (pj.title || "").replace(/[^a-z0-9_\- ]/gi, "").replace(/\s+/g, "_").slice(0, 40) || "video", size: s.bitrate ? `${(s.bitrate / 8000 / 1024).toFixed(1)} MB` : undefined, thumbnail: pj.thumbnailUrl || "" })).filter((v: any) => v.height).sort((a: any, b: any) => b.height - a.height).slice(0, 8);
+            if (mapped.length) { best = mapped; console.log(`[youtube] piped ${host} found ${mapped.length} for ${jobId}`); break; }
+          } catch {}
+        }
+      }
+    } catch (e) { console.warn(`[youtube] piped failed ${jobId}`, String(e).slice(0, 150)); }
+    if (best.length) return best;
+  }
+  // piped fallback if still empty — local: 3 hosts
   if (best.length === 0) {
     try {
       const idMatch = url.match(/(?:v=|\.be\/)([a-zA-Z0-9_-]{11})/);
       const vid = idMatch ? idMatch[1] : null;
       if (vid) {
-        const pipedHosts = isHobbyFastPath ? ["https://pipedapi.kavin.rocks"] : ["https://pipedapi.kavin.rocks", "https://pipedapi.adminforge.de", "https://pipedapi.syncpundit.io"];
-        const pipedTimeout = isHobbyFastPath ? 3500 : 7000;
+        const pipedHosts = ["https://pipedapi.kavin.rocks", "https://pipedapi.adminforge.de", "https://pipedapi.syncpundit.io"];
         const pipedDispatcher = (() => { try { return getFetchDispatcher(); } catch { return undefined; } })();
         for (const host of pipedHosts) {
           try {
-            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(pipedTimeout) };
+            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(7000) };
             if (pipedDispatcher) pipedOpts.dispatcher = pipedDispatcher;
             const r = await fetch(`${host}/streams/${vid}`, pipedOpts);
             if (!r.ok) continue;

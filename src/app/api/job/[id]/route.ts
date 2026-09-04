@@ -41,7 +41,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         // Guard against thundering herd: try to claim job via status PARSING
         const claimed = await prisma.downloadJob.updateMany({ where: { id, status: "QUEUED" }, data: { status: "PARSING", progress: 10 } });
         if (claimed.count > 0) {
-          await processSingleJob(id, job.sourceUrl);
+          try {
+            await processSingleJob(id, job.sourceUrl);
+          } catch (procErr: any) {
+            console.error(`[job] processSingleJob threw for ${id}`, String(procErr?.message || procErr).slice(0, 300));
+            // Ensure we don't leave PARSING forever — mark FAILED so frontend stops polling
+            try { await prisma.downloadJob.update({ where: { id }, data: { status: "FAILED", progress: 100, detectedUrls: [{ url: job.sourceUrl, quality: "auto", ext: "mp4", thumbnail: "", hasAudio: false, needsMerge: false, _failed: true, error: "youtube_blocked" } as any] } }); } catch {}
+          }
           job = (await prisma.downloadJob.findUnique({ where: { id } })) || job;
         } else {
           // Another request is already processing — return PARSING so frontend keeps polling
