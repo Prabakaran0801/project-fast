@@ -72,7 +72,10 @@ async function runYtDlpStep(step: Extract<Step, { type: "ytdlp" }>, url: string,
   try {
     ensureYtDlpPath();
     const cookiesPath = step.withCookies ? getCookiesPath(jobId) : null;
-    if (step.withCookies && !cookiesPath) return [];
+    if (step.withCookies && !cookiesPath) {
+      console.warn(`[ytdlp] no cookies available for ${jobId} — bot check likely`);
+      return [];
+    }
 
     const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
     const args: any = {

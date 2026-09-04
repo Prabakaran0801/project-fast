@@ -49,8 +49,11 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
 
   const runYtDlp = async (client: string, useFree: boolean, withCookies: boolean, withProxy: boolean): Promise<any> => {
     try {
+      if (withCookies && !cookiesPath) {
+        console.warn(`[ytdlp] no cookies available for ${jobId} — bot check likely`);
+      }
       const ytdlp: any = await import("yt-dlp-exec").then((m: any) => m.default || m);
-      const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...(withProxy && proxyArgs.proxy ? { proxy: proxyArgs.proxy } : {}), ...(withCookies ? { cookies: cookiesPath! } : {}) };
+      const args: any = { dumpSingleJson: true, noPlaylist: true, noWarnings: true, ...(withProxy && proxyArgs.proxy ? { proxy: proxyArgs.proxy } : {}), ...(withCookies && cookiesPath ? { cookies: cookiesPath } : {}) };
       if (useFree) (args as any).preferFreeFormats = true;
       if (client !== "web" && client !== "default") args.extractorArgs = `youtube:player_client=${client}`;
       if (withProxy && proxyArgs.proxy) console.log(`[youtube] proxy ${String(proxyArgs.proxy).replace(/:[^:/@]+@/, "://***@")} for ${jobId}`);
