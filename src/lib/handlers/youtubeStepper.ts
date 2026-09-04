@@ -14,20 +14,19 @@ type Step =
   | { type: "piped"; host: string }
   | { type: "ytdlp"; client: string; free: boolean; withCookies?: boolean };
 
-// Order matters: cheapest / most-likely-to-work first. "tv" client currently
-// doesn't require YouTube's PO token, so it goes first.
+// Order: default first (proved fastest for xwvPmhArfEY/wZyxxo0qkPo 9.6s), tv is slower/fails for wZyxxo0qkPo
 export const YOUTUBE_STEPS: Step[] = [
-  { type: "ytdlp", client: "tv", free: true },
   { type: "ytdlp", client: "default", free: true },
+  { type: "ytdlp", client: "tv", free: true },
   { type: "piped", host: "https://pipedapi.kavin.rocks" },
   { type: "piped", host: "https://pipedapi.adminforge.de" },
   { type: "ytdlp", client: "android", free: true },
   { type: "ytdlp", client: "tv", free: true, withCookies: true },
 ];
 
-// Per-step budget. Keep this well under 10s to leave room for DB read/write
-// and cold-start overhead. 6s is a safe ceiling for a single yt-dlp attempt.
-const STEP_TIMEOUT_MS = 6000;
+// Real yt-dlp default needs 9.6s for wZyxxo0qkPo, so 8.5s is minimum to avoid timeout.
+// Vercel limit 10s leaves 0.5s for DB, so 8500 is tight but required.
+const STEP_TIMEOUT_MS = 8500;
 
 const MIN_FORMATS_TO_STOP_EARLY = 4;
 
