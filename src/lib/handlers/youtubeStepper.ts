@@ -14,14 +14,15 @@ type Step =
   | { type: "piped"; host: string }
   | { type: "ytdlp"; client: string; free: boolean; withCookies?: boolean };
 
-// Order: default first (proved fastest for xwvPmhArfEY/wZyxxo0qkPo 9.6s), tv is slower/fails for wZyxxo0qkPo
+// Bump yt-dlp binary is done via scripts/ensure-yt-dlp.js (latest), wrapper yt-dlp-exec 1.0.2 is just execa wrapper.
+// Cheap fix for INNERTUBE_CONTEXT with tv+cookies: use web+cookies (more maintained) instead
 export const YOUTUBE_STEPS: Step[] = [
   { type: "ytdlp", client: "default", free: true },
   { type: "ytdlp", client: "tv", free: true },
   { type: "piped", host: "https://pipedapi.kavin.rocks" },
   { type: "piped", host: "https://pipedapi.adminforge.de" },
   { type: "ytdlp", client: "android", free: true },
-  { type: "ytdlp", client: "tv", free: true, withCookies: true },
+  { type: "ytdlp", client: "web", free: true, withCookies: true },
 ];
 
 // Real yt-dlp default needs 9.6s for wZyxxo0qkPo, so 8.5s is minimum to avoid timeout.
