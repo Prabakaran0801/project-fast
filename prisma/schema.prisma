@@ -17,18 +17,20 @@ model User {
 }
 
 model DownloadJob {
-  id           String    @id @default(cuid())
-  userId       String?
-  user         User?     @relation(fields: [userId], references: [id])
-  sourceUrl    String
-  detectedUrls Json? // [{ url, quality, ext, thumbnail, size }]
-  status       JobStatus @default(QUEUED)
-  progress     Int       @default(0)
-  fileUrl      String?
-  fileSize     BigInt?
-  expiresAt    DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id])
+  sourceUrl      String
+  detectedUrls   Json? // [{ url, quality, ext, thumbnail, size }]
+  status         JobStatus @default(QUEUED)
+  progress       Int       @default(0)
+  fileUrl        String?
+  fileSize       BigInt?
+  expiresAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  attemptIndex   Int       @default(0)
+  partialFormats Json?
 
   @@index([userId, createdAt])
   @@index([status])

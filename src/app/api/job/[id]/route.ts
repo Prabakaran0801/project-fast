@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { isYoutube } from "@/lib/handlers";
+import { runOneYoutubeStep } from "@/lib/handlers/youtubeStepper";
 import { processSingleJob } from "@/lib/processJob";
 
 export const maxDuration = 10;
@@ -38,27 +40,78 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // Fallback inline if after() worker hasn't claimed job yet (Hobby without QStash)
     // after() in POST /api/parse triggers POST /api/worker/process in background
     if (job.status === "QUEUED") {
-      try {
-        // Guard against thundering herd: try to claim job via status PARSING
-        const claimed = await prisma.downloadJob.updateMany({ where: { id, status: "QUEUED" }, data: { status: "PARSING", progress: 10 } });
-        if (claimed.count > 0) {
-          try {
-            await processSingleJob(id, job.sourceUrl);
-          } catch (procErr: any) {
-            console.error(`[job] processSingleJob threw for ${id}`, String(procErr?.message || procErr).slice(0, 300));
-            // Ensure we don't leave PARSING forever — mark FAILED so frontend stops polling
-            try { await prisma.downloadJob.update({ where: { id }, data: { status: "FAILED", progress: 100, detectedUrls: [{ url: job.sourceUrl, quality: "auto", ext: "mp4", thumbnail: "", hasAudio: false, needsMerge: false, _failed: true, error: "youtube_blocked" } as any] } }); } catch {}
-          }
+      const claimed = await prisma.downloadJob.updateMany({
+        where: { id, status: "QUEUED" },
+        data: { status: "PARSING", progress: 10, attemptIndex: 0, partialFormats: [] },
+      });
+      if (claimed.count > 0) {
+        job.status = "PARSING" as any;
+        job.progress = 10;
+        (job as any).attemptIndex = 0;
+        (job as any).partialFormats = [];
+      } else {
+        // Another poll already claimed it
+        job.status = "PARSING" as any;
+      }
+    }
+
+    if (job.status === "PARSING") {
+      if (!isYoutube(job.sourceUrl)) {
+        // Non-YouTube: keep existing fast-path full processSingleJob (typically quick)
+        try {
+          await processSingleJob(id, job.sourceUrl);
           job = (await prisma.downloadJob.findUnique({ where: { id } })) || job;
-        } else {
-          // Another request is already processing — return PARSING so frontend keeps polling
-          job.status = "PARSING" as any;
-          job.progress = 10;
-          return NextResponse.json(job);
+        } catch (e: any) {
+          console.error(`[job] processSingleJob failed for ${id}`, String(e?.message || e).slice(0, 300));
+          try { await prisma.downloadJob.update({ where: { id }, data: { status: "FAILED", progress: 100, detectedUrls: [{ url: job.sourceUrl, quality: "auto", ext: "mp4", thumbnail: "", hasAudio: false, needsMerge: false, _failed: true, error: "blocked_or_unsupported" } as any] } }); job = (await prisma.downloadJob.findUnique({ where: { id } })) || job; } catch {}
         }
-      } catch (e) {
-        console.warn(`[job] inline process failed for ${id}`, String(e).slice(0, 200));
-        // Fall through to return current job state
+      } else {
+        // YouTube: advance exactly one step this poll (one Vercel invocation <6s)
+        const currentIndex = (job as any).attemptIndex ?? 0;
+        const currentPartial = ((job as any).partialFormats as any[]) ?? [];
+
+        try {
+          const { formats, nextStepIndex, done } = await runOneYoutubeStep(
+            job.sourceUrl,
+            id,
+            currentIndex,
+            currentPartial
+          );
+
+          if (done) {
+            const isFailed = formats.length === 0;
+            const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+            const finalFormats = isFailed
+              ? [{
+                  url: job.sourceUrl, quality: "auto", ext: "mp4", thumbnail: "",
+                  hasAudio: false, needsMerge: false, title: "video",
+                  _failed: true, error: "youtube_blocked",
+                } as any]
+              : formats;
+
+            await prisma.downloadJob.update({
+              where: { id },
+              data: {
+                status: isFailed ? "FAILED" : "COMPLETED",
+                progress: 100,
+                detectedUrls: finalFormats,
+                expiresAt,
+              },
+            });
+            job = (await prisma.downloadJob.findUnique({ where: { id } })) || job;
+          } else {
+            const progressPct = Math.min(80, 10 + nextStepIndex * 12);
+            await prisma.downloadJob.update({
+              where: { id },
+              data: { attemptIndex: nextStepIndex, partialFormats: formats, progress: progressPct },
+            });
+            job.progress = progressPct as any;
+            (job as any).attemptIndex = nextStepIndex;
+            (job as any).partialFormats = formats;
+          }
+        } catch (e: any) {
+          console.warn(`[job] stepper failed for ${id} step ${currentIndex}`, String(e?.message || e).slice(0, 200));
+        }
       }
     }
     // Auto-expire for testing (1 min) — if expiresAt passed, mark EXPIRED and delete R2 /merged file
