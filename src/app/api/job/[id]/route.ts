@@ -26,12 +26,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   try {
     let job = await prisma.downloadJob.findUnique({ where: { id } });
     if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    // Hobby fix: stale PARSING auto-reset — if process was killed at maxDuration=10, retry instead of hanging 90 polls
+    // Hobby fix: stale PARSING auto-reset — Vercel kills at 10s leave PARSING forever; reset quickly to avoid 90 polls hang
+    // Use 12s so first retry happens after Vercel's 10s kill + next poll
     if (job.status === "PARSING") {
       const staleMs = Date.now() - new Date(job.updatedAt).getTime();
-      if (staleMs > 30 * 1000) {
+      if (staleMs > 12 * 1000) {
         console.warn(`[job] stale PARSING ${id} ${Math.round(staleMs/1000)}s → reset to QUEUED for retry`);
-        try { await prisma.downloadJob.update({ where: { id }, data: { status: "QUEUED", progress: 0 } }); job.status = "QUEUED" as any; } catch {}
+        try { await prisma.downloadJob.update({ where: { id }, data: { status: "QUEUED", progress: 0 } }); job.status = "QUEUED" as any; } catch (e) { console.warn(`[job] stale reset failed for ${id}`, String(e).slice(0,100)); }
       }
     }
     // Fallback inline if after() worker hasn't claimed job yet (Hobby without QStash)

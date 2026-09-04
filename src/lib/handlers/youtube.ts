@@ -32,8 +32,8 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
       if (client !== "web" && client !== "default") args.extractorArgs = `youtube:player_client=${client}`;
       if (withProxy && proxyArgs.proxy) console.log(`[youtube] proxy ${String(proxyArgs.proxy).replace(/:[^:/@]+@/, "://***@")} for ${jobId}`);
       const opts = withProxy ? undefined : { env: stripProxyEnv(), extendEnv: false };
-      // Hobby timeout is shorter to fit maxDuration=10 (8s vs 22s local)
-      const timeoutMs = isHobbyFastPath ? 8000 : 22000;
+      // Hobby: must finish <7s total (piped 3.5s + yt-dlp 4s + overhead) to avoid Vercel 10s kill
+      const timeoutMs = isHobbyFastPath ? 4000 : 22000;
       return await Promise.race([
         ytdlp(url, args, opts),
         new Promise((_, rej) => setTimeout(() => rej(new Error("yt-dlp timeout")), timeoutMs)),
@@ -129,7 +129,7 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
         const pipedDispatcher = (() => { try { return getFetchDispatcher(); } catch { return undefined; } })();
         for (const host of pipedHosts) {
           try {
-            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3500) };
+            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3000) };
             if (pipedDispatcher) pipedOpts.dispatcher = pipedDispatcher;
             const r = await fetch(`${host}/streams/${vid}`, pipedOpts);
             if (!r.ok) continue;

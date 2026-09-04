@@ -17,9 +17,9 @@ export async function processSingleJob(jobId: string, url: string) {
     await prisma.downloadJob.update({ where: { id: jobId }, data: { detectedUrls: detectedDirect as any, status: "COMPLETED", progress: 100, expiresAt: exp } });
     return detectedDirect;
   }
-  // Hobby: 9s overall timeout to fit maxDuration=10 (8s yt-dlp + 1s overhead), else 30s locally
+  // Hobby: 8s overall to leave 2s for DB writes before Vercel 10s kill (piped 3s + yt-dlp 4s), else 30s locally
   const isHobby = process.env.VERCEL === "1";
-  const routeTimeoutMs = isHobby ? 9000 : 30000;
+  const routeTimeoutMs = isHobby ? 8000 : 30000;
   let routed: any[] = [];
   let pageTitle = "";
   try {
