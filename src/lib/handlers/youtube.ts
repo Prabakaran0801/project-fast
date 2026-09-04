@@ -119,17 +119,18 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
       if (best.length >= 4) break;
     }
   }
-  // piped fallback if still empty
+  // piped fallback if still empty — Hobby: single host fast, local: 3 hosts
   if (best.length === 0) {
     try {
       const idMatch = url.match(/(?:v=|\.be\/)([a-zA-Z0-9_-]{11})/);
       const vid = idMatch ? idMatch[1] : null;
       if (vid) {
-        const pipedHosts = ["https://pipedapi.kavin.rocks", "https://pipedapi.adminforge.de", "https://pipedapi.syncpundit.io"];
+        const pipedHosts = isHobbyFastPath ? ["https://pipedapi.kavin.rocks"] : ["https://pipedapi.kavin.rocks", "https://pipedapi.adminforge.de", "https://pipedapi.syncpundit.io"];
+        const pipedTimeout = isHobbyFastPath ? 3500 : 7000;
         const pipedDispatcher = (() => { try { return getFetchDispatcher(); } catch { return undefined; } })();
         for (const host of pipedHosts) {
           try {
-            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(7000) };
+            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(pipedTimeout) };
             if (pipedDispatcher) pipedOpts.dispatcher = pipedDispatcher;
             const r = await fetch(`${host}/streams/${vid}`, pipedOpts);
             if (!r.ok) continue;
@@ -163,8 +164,8 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
       console.warn(`[youtube] piped failed ${jobId}`, String(e).slice(0, 150));
     }
   }
-  // ytdl-core fallback
-  if (best.length === 0) {
+  // ytdl-core fallback — skip on Hobby to stay <10s (needs network + decode)
+  if (best.length === 0 && !isHobbyFastPath) {
     try {
       const ytdl: any = await import("@distube/ytdl-core").then((m: any) => m.default || m);
       const info = await (ytdl as any).getInfo(url);

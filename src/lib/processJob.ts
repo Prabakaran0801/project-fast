@@ -17,13 +17,15 @@ export async function processSingleJob(jobId: string, url: string) {
     await prisma.downloadJob.update({ where: { id: jobId }, data: { detectedUrls: detectedDirect as any, status: "COMPLETED", progress: 100, expiresAt: exp } });
     return detectedDirect;
   }
-  // delegate to per-site handlers with 30s overall timeout so PARSING doesn't hang 90 polls (youtube 2h8vP4U7OZ4 took 70s)
+  // Hobby: 9s overall timeout to fit maxDuration=10 (8s yt-dlp + 1s overhead), else 30s locally
+  const isHobby = process.env.VERCEL === "1";
+  const routeTimeoutMs = isHobby ? 9000 : 30000;
   let routed: any[] = [];
   let pageTitle = "";
   try {
     const res: any = await Promise.race([
       routeHandlers(url, jobId),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("routeHandlers timeout 30s")), 30000)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error(`routeHandlers timeout ${routeTimeoutMs}ms`)), routeTimeoutMs)),
     ]);
     routed = res.detected;
     pageTitle = res.pageTitle;
