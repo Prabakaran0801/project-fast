@@ -35,14 +35,14 @@ export function getCookiesPath(jobId: string): string | undefined {
     }
   }
 
-  if (rawCookies && fs.existsSync(rawCookies)) return rawCookies;
+  if (rawCookies && fs.existsSync(/* turbopackIgnore: true */ rawCookies)) return rawCookies;
   if (rawCookies) {
     console.warn(`[cookies] YTDLP_COOKIES set but not valid Netscape/base64 and not a file path`);
     return undefined;
   }
 
   const localPath = path.join(process.cwd(), "cookies.txt");
-  if (fs.existsSync(localPath)) return localPath;
+  if (fs.existsSync(/* turbopackIgnore: true */ localPath)) return localPath;
 
   console.warn(`[cookies] no valid cookies source found for ${jobId} — YouTube may hit bot check`);
   return undefined;
@@ -60,7 +60,7 @@ export function getCookiesPathWorker(): string | undefined {
       return undefined;
     }
   }
-  if (rawCookies && fs.existsSync(rawCookies)) return rawCookies;
+  if (rawCookies && fs.existsSync(/* turbopackIgnore: true */ rawCookies)) return rawCookies;
   const localPath = path.join(process.cwd(), "cookies.txt");
-  return fs.existsSync(localPath) ? localPath : undefined;
+  return fs.existsSync(/* turbopackIgnore: true */ localPath) ? localPath : undefined;
 }
