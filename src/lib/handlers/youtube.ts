@@ -10,8 +10,7 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
   const proxyArgs = getYtDlpProxyArgs();
   const proxyUrl = getProxyUrl();
   if (proxyUrl) console.log(`[youtube] proxy ${proxyUrl.replace(/:[^:/@]+@/, "://***@")} for ${jobId}`);
-  // Hobby 10s fast-path: default + android (datacenter blocked on default, android often works), single free variant to save time
-  // Local: full 4 clients × 2 free variants; Hobby: 2 clients × 1 free variant = <7s total
+  // Hobby: default+android to handle rate-limit, but tight timeouts to stay <9s
   const isHobbyFastPath = process.env.VERCEL === "1" || process.env.HOBBY_FAST_PATH === "1";
   const clients: readonly string[] = isHobbyFastPath ? (["default", "android"] as const) : (["default", "web", "android", "tv"] as const);
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -33,7 +32,7 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
         const pipedDispatcher = (() => { try { return getFetchDispatcher(); } catch { return undefined; } })();
         for (const host of pipedHosts) {
           try {
-            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(2500) };
+            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(2000) };
             if (pipedDispatcher) pipedOpts.dispatcher = pipedDispatcher;
             const r = await fetch(`${host}/streams/${vid}`, pipedOpts);
             if (!r.ok) { console.warn(`[youtube] piped ${host} http ${r.status} for ${jobId}`); continue; }
@@ -56,7 +55,7 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
       if (client !== "web" && client !== "default") args.extractorArgs = `youtube:player_client=${client}`;
       if (withProxy && proxyArgs.proxy) console.log(`[youtube] proxy ${String(proxyArgs.proxy).replace(/:[^:/@]+@/, "://***@")} for ${jobId}`);
       const opts = withProxy ? undefined : { env: stripProxyEnv(), extendEnv: false };
-      const timeoutMs = isHobbyFastPath ? 3500 : 22000;
+      const timeoutMs = isHobbyFastPath ? 2500 : 22000;
       return await Promise.race([
         ytdlp(url, args, opts),
         new Promise((_, rej) => setTimeout(() => rej(new Error("yt-dlp timeout")), timeoutMs)),
