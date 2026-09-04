@@ -1,4 +1,6 @@
 import { NextRequest } from "next/server";
+
+export const maxDuration = 10;
 // Free permanent alternative to paid Webshare for local India ISP block
 // This route runs on Vercel US (iad1) — fetches target URL via Vercel's IP (not blocked) and returns body
 // Local dev can call /api/fetch-proxy?url=... to bypass India ISP without YTDLP_PROXY

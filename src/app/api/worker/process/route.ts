@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { processSingleJob } from "@/lib/processJob";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 10;
 
 function verifyCron(req: NextRequest) {
   const secret = process.env.CRON_SECRET;

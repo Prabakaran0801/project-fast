@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { processSingleJob } from "@/lib/processJob";
 
-export const maxDuration = 60;
+export const maxDuration = 10;
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

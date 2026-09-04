@@ -10,7 +10,7 @@ import { youtubeThumbnail } from "@/lib/handlers/utils/thumbnail";
  * Same contract as /api/parse but forces universalHandler (cheerio -> ytDlpUniversal -> direct)
  * Use when URL is NOT youtube and NOT instagram
  */
-export const maxDuration = 60;
+export const maxDuration = 10;
 export async function POST(req: NextRequest) {
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
   const rl = await checkRateLimit(ip);

@@ -9,7 +9,7 @@ import { youtubeThumbnail } from "@/lib/handlers/utils/thumbnail";
  * Same input as /api/parse but forces youtubeHandler (web→android best keeper)
  * Use when frontend knows URL is youtube.com / youtu.be
  */
-export const maxDuration = 60;
+export const maxDuration = 10;
 export async function POST(req: NextRequest) {
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
   const rl = await checkRateLimit(ip);

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { checkRateLimit } from "@/lib/ratelimit";
 import prisma from "@/lib/prisma";
 
-export const maxDuration = 60;
+export const maxDuration = 10;
 export const dynamic = "force-dynamic";
 
 const schema = z.object({ url: z.string().min(1) });

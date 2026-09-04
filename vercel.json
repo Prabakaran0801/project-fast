@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "buildCommand": "node scripts/ensure-yt-dlp.js && prisma generate && next build",
-  "installCommand": "npm install",
+  "installCommand": "env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy -u YTDLP_PROXY -u NO_PROXY -u no_proxy npm install",
   "regions": ["iad1"],
   "crons": [
     {
@@ -11,14 +11,17 @@
     }
   ],
   "functions": {
-    "src/app/api/cron/process/route.ts": { "maxDuration": 60 },
-    "src/app/api/worker/process/route.ts": { "maxDuration": 60 },
-    "src/app/api/job/[id]/route.ts": { "maxDuration": 60 },
-    "src/app/api/parse/route.ts": { "maxDuration": 60 },
-    "src/app/api/parse/youtube/route.ts": { "maxDuration": 60 },
-    "src/app/api/parse/universal/route.ts": { "maxDuration": 60 },
-    "src/app/api/parse/social/route.ts": { "maxDuration": 60 },
-    "src/app/api/download/route.ts": { "maxDuration": 60 }
+    "src/app/api/cron/process/route.ts": { "maxDuration": 10 },
+    "src/app/api/worker/process/route.ts": { "maxDuration": 10 },
+    "src/app/api/job/[id]/route.ts": { "maxDuration": 10 },
+    "src/app/api/parse/route.ts": { "maxDuration": 10 },
+    "src/app/api/parse/youtube/route.ts": { "maxDuration": 10 },
+    "src/app/api/parse/universal/route.ts": { "maxDuration": 10 },
+    "src/app/api/parse/social/route.ts": { "maxDuration": 10 },
+    "src/app/api/download/route.ts": { "maxDuration": 10 },
+    "src/app/api/download/proxy/route.ts": { "maxDuration": 10 },
+    "src/app/api/fetch-proxy/route.ts": { "maxDuration": 10 },
+    "src/app/api/image/proxy/route.ts": { "maxDuration": 10 }
   },
   "headers": [
     {

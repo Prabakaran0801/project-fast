@@ -10,7 +10,7 @@ import { youtubeThumbnail } from "@/lib/handlers/utils/thumbnail";
  * Always prefers ytDlpGeneric over cheerio (cheerio gives 403 video.twimg.com bare links)
  * Isolated so instagram merge-skip and twitter proxy logic don't affect YouTube
  */
-export const maxDuration = 60;
+export const maxDuration = 10;
 export async function POST(req: NextRequest) {
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
   const rl = await checkRateLimit(ip);
