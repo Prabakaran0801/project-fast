@@ -10,11 +10,10 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
   const proxyArgs = getYtDlpProxyArgs();
   const proxyUrl = getProxyUrl();
   if (proxyUrl) console.log(`[youtube] proxy ${proxyUrl.replace(/:[^:/@]+@/, "://***@")} for ${jobId}`);
-  // Hobby 10s fast-path: single default client (visionos full DASH 144p-2160p) — proven to return 8 in <6s on prod.
-  // Multi-client fallback (web/android/tv) only if default fails — keeps Vercel Hobby within maxDuration=10.
-  // Prefer NO proxy — dead proxy 407 is last resort only.
+  // Hobby 10s fast-path: default + android (datacenter blocked on default, android often works), single free variant to save time
+  // Local: full 4 clients × 2 free variants; Hobby: 2 clients × 1 free variant = <7s total
   const isHobbyFastPath = process.env.VERCEL === "1" || process.env.HOBBY_FAST_PATH === "1";
-  const clients: readonly string[] = isHobbyFastPath ? (["default"] as const) : (["default", "web", "android", "tv"] as const);
+  const clients: readonly string[] = isHobbyFastPath ? (["default", "android"] as const) : (["default", "web", "android", "tv"] as const);
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   // yt-dlp auto-reads HTTP_PROXY/HTTPS_PROXY/ALL_PROXY from the environment. When we want to run WITHOUT a
   // proxy (the working default), we must strip them — otherwise a dead proxy in .env (402 Payment Required)
@@ -44,10 +43,12 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
   };
 
   // Phase 1: no-proxy multi-client search (default first — returns 144p-2160p full catalog)
+  // Hobby: only free=true to cut 50% calls (8s total vs 16s)
+  const freeVariants: readonly boolean[] = isHobbyFastPath ? ([true] as const) : ([true, false] as const);
   for (const withCookies of [false, true] as const) {
     if (withCookies && !cookiesPath) continue;
     for (const client of clients) {
-      for (const useFree of [true, false] as const) {
+      for (const useFree of freeVariants) {
         const cur: any = await runYtDlp(client, useFree, withCookies, false);
         if (cur && !cur.__error) {
           try {
@@ -119,25 +120,25 @@ export async function youtubeHandler(url: string, jobId: string, existing: any[]
       if (best.length >= 4) break;
     }
   }
-  // Hobby: try piped first (datacenter IP blocks yt-dlp, piped is faster and bypasses bot)
+  // Hobby: try piped first (datacenter IP blocks yt-dlp, piped is faster and bypasses bot) — try 2 hosts, kavin.rocks often 403 for xwvPmhArfEY
   if (isHobbyFastPath && best.length === 0) {
     try {
       const idMatch = url.match(/(?:v=|\.be\/)([a-zA-Z0-9_-]{11})/);
       const vid = idMatch ? idMatch[1] : null;
       if (vid) {
-        const pipedHosts = ["https://pipedapi.kavin.rocks"];
+        const pipedHosts = ["https://pipedapi.kavin.rocks", "https://pipedapi.adminforge.de"];
         const pipedDispatcher = (() => { try { return getFetchDispatcher(); } catch { return undefined; } })();
         for (const host of pipedHosts) {
           try {
-            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(3000) };
+            const pipedOpts: any = { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(2500) };
             if (pipedDispatcher) pipedOpts.dispatcher = pipedDispatcher;
             const r = await fetch(`${host}/streams/${vid}`, pipedOpts);
-            if (!r.ok) continue;
+            if (!r.ok) { console.warn(`[youtube] piped ${host} http ${r.status} for ${jobId}`); continue; }
             const pj: any = await r.json();
             const streams: any[] = [...(pj.videoStreams || []), ...(pj.audioStreams || [])];
             const mapped = streams.filter((s: any) => s.url).map((s: any) => ({ url: s.url, quality: s.quality || (s.height ? `${s.height}p` : "best"), height: s.height || parseInt(s.quality) || undefined, ext: (s.mimeType || "video/mp4").split("/")[1]?.split(";")[0] || "mp4", hasAudio: !!s.audioTrackName || s.mimeType?.includes("audio") || false, needsMerge: false, title: (pj.title || "").replace(/[^a-z0-9_\- ]/gi, "").replace(/\s+/g, "_").slice(0, 40) || "video", size: s.bitrate ? `${(s.bitrate / 8000 / 1024).toFixed(1)} MB` : undefined, thumbnail: pj.thumbnailUrl || "" })).filter((v: any) => v.height).sort((a: any, b: any) => b.height - a.height).slice(0, 8);
             if (mapped.length) { best = mapped; console.log(`[youtube] piped ${host} found ${mapped.length} for ${jobId}`); break; }
-          } catch {}
+          } catch (e) { console.warn(`[youtube] piped ${host} failed for ${jobId}`, String(e).slice(0,120)); }
         }
       }
     } catch (e) { console.warn(`[youtube] piped failed ${jobId}`, String(e).slice(0, 150)); }
